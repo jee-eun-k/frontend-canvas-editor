@@ -1,0 +1,165 @@
+🚀 Bun 기반 개발 & 배포 로드맵
+Phase 1: 프로젝트 초기 설정 (Day 1 - 2시간)
+Step 1: GitHub Repository 생성
+bash# GitHub 리포 생성은 동일
+git clone https://github.com/[username]/frontend-canvas-editor.git
+cd frontend-canvas-editor
+Step 2: Bun 프로젝트 초기화
+bash# 1. Bun 설치 (없다면)
+curl -fsSL https://bun.sh/install | bash
+
+# 2. React + TypeScript 프로젝트 생성
+bun create react-app . --template typescript
+
+# 또는 직접 초기화
+bun init -y
+bun add react react-dom
+bun add -D @types/react @types/react-dom typescript
+Step 3: 필요한 라이브러리 설치
+bash# 메인 라이브러리
+bun add fabric
+bun add @types/fabric
+bun add styled-components
+bun add @types/styled-components
+
+# 개발 도구
+bun add -D prettier eslint-config-prettier
+bun add -D @typescript-eslint/eslint-plugin @typescript-eslint/parser
+bun add -D vite @vitejs/plugin-react  # Vite 사용 권장
+Step 4: Vite 설정 (Bun과 잘 호환됨)
+typescript// vite.config.ts
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 3000,
+  },
+  build: {
+    outDir: 'dist',
+  },
+})
+json// package.json 스크립트 수정
+{
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint src --ext ts,tsx",
+    "format": "prettier --write src/**/*.{ts,tsx}"
+  }
+}
+개발 과정에서 Bun 활용
+개발 서버 실행
+bash# 개발 서버 시작
+bun run dev
+
+# 또는 직접
+bun vite
+패키지 관리
+bash# 새 패키지 추가
+bun add lodash
+bun add -D @types/lodash
+
+# 패키지 제거
+bun remove lodash
+
+# 의존성 설치
+bun install
+빌드 및 테스트
+bash# 프로덕션 빌드
+bun run build
+
+# 빌드 미리보기
+bun run preview
+
+# 린트 체크
+bun run lint
+
+# 코드 포맷팅
+bun run format
+Phase 5: 배포 설정 (Bun 고려사항)
+Step 16: 배포 설정 (수정됨)
+bash# 1. Vercel 배포 (Bun 지원)
+bun add -g vercel
+vercel --prod
+
+# vercel.json 설정
+{
+  "buildCommand": "bun run build",
+  "outputDirectory": "dist",
+  "framework": "vite"
+}
+bash# 2. Netlify 배포
+bun run build
+# dist 폴더 업로드
+
+# netlify.toml 설정
+[build]
+  command = "bun run build"
+  publish = "dist"
+bash# 3. GitHub Pages 배포
+bun add -D gh-pages
+
+# package.json에 추가
+{
+  "homepage": "https://[username].github.io/frontend-canvas-editor",
+  "scripts": {
+    "predeploy": "bun run build",
+    "deploy": "gh-pages -d dist"
+  }
+}
+
+bun run deploy
+Bun 사용시 장점들
+1. 속도
+bash# npm vs bun 비교
+npm install        # ~30초
+bun install        # ~3초
+
+npm run dev        # ~5초 시작
+bun run dev        # ~1초 시작
+2. TypeScript 네이티브 지원
+typescript// bun으로 직접 TypeScript 실행 가능
+bun run src/utils/test.ts
+3. Built-in 테스트
+bash# 테스트 파일 생성
+// src/utils/geometryUtils.test.ts
+import { expect, test } from "bun:test";
+
+test("rectangle collision detection", () => {
+  // 테스트 코드
+});
+
+# 테스트 실행
+bun test
+README.md 수정 예시
+markdown# Frontend Canvas Editor
+
+## 🚀 Quick Start
+
+### Prerequisites
+- [Bun](https://bun.sh/) (latest version)
+
+### Installation
+```bash
+bun install
+Development
+bashbun run dev
+Build
+bashbun run build
+🏗 Tech Stack
+
+Runtime: Bun
+Frontend: React 18 + TypeScript
+Bundler: Vite
+Canvas: Fabric.js
+Styling: Styled Components
+
+📦 Why Bun?
+
+⚡ 10x faster package installation
+🔥 Native TypeScript support
+🛠 Built-in test runner
+📦 Single tool for everything
