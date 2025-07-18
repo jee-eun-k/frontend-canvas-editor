@@ -1,5 +1,5 @@
 import React from 'react';
-import { CanvasEditor } from './components/CanvasEditor';
+import { CanvasEditor } from './components/CanvasEditor.simple';
 import './App.css';
 
 function App() {
