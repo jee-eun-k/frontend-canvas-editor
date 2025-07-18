@@ -1,560 +1,310 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useFabricJSEditor, FabricJSCanvas } from 'fabricjs-react';
 import * as fabric from 'fabric';
 
-interface Rectangle {
-  id: string;
-  parentId?: string;
-  childIds: string[];
-  position: { x: number; y: number };
-  size: { width: number; height: number };
-  color: string;
-  selected: boolean;
-  hovered: boolean;
-  fabricObject?: fabric.Rect;
+
+// 1. 데이터 구조 정의 (TypeScript Interface)
+interface CanvasObject {
+	id: string; // 고유 식별자
+	parentId: string | null; // 부모 ID, 최상위 객체는 null
+	left: number;
+	top: number;
+	width: number;
+	height: number;
+	fill: string; // 내부 색상
+	stroke: string; // Border 색상
 }
 
-export const CanvasEditor: React.FC = () => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [fabricCanvas, setFabricCanvas] = useState<fabric.Canvas | null>(null);
-  const [rectangles, setRectangles] = useState<Rectangle[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
+// 2. 초기 데이터 생성
+const initialObjects: CanvasObject[] = [
+	{
+		id: 'parent',
+		parentId: null,
+		left: 100,
+		top: 50,
+		width: 600,
+		height: 500,
+		fill: 'rgba(0, 0, 255, 0.3)',
+		stroke: 'blue',
+	},
+	{
+		id: 'child',
+		parentId: 'parent',
+		left: 150,
+		top: 100,
+		width: 300,
+		height: 250,
+		fill: 'rgba(255, 165, 0, 0.3)',
+		stroke: 'orange',
+	},
+	{
+		id: 'grandchild',
+		parentId: 'child',
+		left: 200,
+		top: 150,
+		width: 150,
+		height: 100,
+		fill: 'rgba(128, 0, 128, 0.3)',
+		stroke: 'purple',
+	},
+];
+
+export const CanvasEditor = () => {
+  const { editor, onReady } = useFabricJSEditor();
+  const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
+  const [hoveredObjectId, setHoveredObjectId] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
-  const [isDragSelecting, setIsDragSelecting] = useState(false);
-  const [lastHoverUpdate, setLastHoverUpdate] = useState(0);
+  const [dragStartPos, setDragStartPos] = useState<{ x: number; y: number } | null>(null);
+  const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [dragCandidate, setDragCandidate] = useState<string | null>(null);
+  const [clickOffset, setClickOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  // Initialize canvas and rectangles
+  const [objects, setObjects] = useState<CanvasObject[]>(initialObjects);
+
+  const handleReady = (canvas: fabric.Canvas) => {
+    canvas.setDimensions({ width: 800, height: 600 });
+    onReady(canvas);
+  };
+
+  // 3. React 상태와 Fabric.js 캔버스 동기화
   useEffect(() => {
-    if (!canvasRef.current) return;
+    if (!editor?.canvas) {
+      return;
+    }
 
-    const canvas = new fabric.Canvas(canvasRef.current, {
-      width: 800,
-      height: 600,
-      backgroundColor: '#ffffff',
-      selection: false, // We handle selection manually
-      preserveObjectStacking: true
-    });
+    // 캔버스를 비우고 상태 기반으로 다시 렌더링
+    editor.canvas.clear();
 
-    setFabricCanvas(canvas);
-
-    // Create initial rectangles
-    const initialRectangles: Rectangle[] = [
-      {
-        id: 'blue-parent',
-        childIds: ['orange-child'],
-        position: { x: 100, y: 100 },
-        size: { width: 300, height: 200 },
-        color: '#4a90e2',
-        selected: false,
-        hovered: false
-      },
-      {
-        id: 'orange-child',
-        parentId: 'blue-parent',
-        childIds: ['purple-grandchild'],
-        position: { x: 130, y: 130 },
-        size: { width: 150, height: 100 },
-        color: '#f5a623',
-        selected: false,
-        hovered: false
-      },
-      {
-        id: 'purple-grandchild',
-        parentId: 'orange-child',
-        childIds: [],
-        position: { x: 160, y: 160 },
-        size: { width: 80, height: 60 },
-        color: '#9013fe',
-        selected: false,
-        hovered: false
+    objects.forEach((obj) => {
+      // Apply drag offset to selected object and its descendants during dragging
+      let displayLeft = obj.left;
+      let displayTop = obj.top;
+      
+      if (isDragging && dragCandidate) {
+        const selectedObj = objects.find(o => o.id === dragCandidate);
+        if (selectedObj) {
+          const descendants = getAllDescendants(dragCandidate, objects);
+          const objectsToMove = [selectedObj, ...descendants];
+          
+          if (objectsToMove.some(moveObj => moveObj.id === obj.id)) {
+            displayLeft = obj.left + dragOffset.x;
+            displayTop = obj.top + dragOffset.y;
+          }
+        }
       }
-    ];
 
-    setRectangles(initialRectangles);
-    renderRectangles(canvas, initialRectangles);
-
-    return () => canvas.dispose();
-  }, []);
-
-  // Render rectangles on canvas
-  const renderRectangles = (canvas: fabric.Canvas, rects: Rectangle[]) => {
-    canvas.clear();
-    
-    rects.forEach(rect => {
-      const fabricRect = new fabric.Rect({
-        left: rect.position.x,
-        top: rect.position.y,
-        width: rect.size.width,
-        height: rect.size.height,
-        fill: rect.color,
-        stroke: '#000000',
-        strokeWidth: rect.selected || rect.hovered ? 3 : 1,
-        selectable: rect.selected, // Enable selection only for selected rectangles
-        evented: rect.selected,    // Enable events only for selected rectangles
-        hasControls: rect.selected,
-        hasBorders: rect.selected,
-        cornerStyle: 'circle',
-        cornerSize: 8,
-        transparentCorners: false,
-        cornerColor: '#007acc'
+      const rect = new fabric.Rect({
+        left: displayLeft,
+        top: displayTop,
+        width: obj.width,
+        height: obj.height,
+        fill: obj.fill,
+        stroke: obj.stroke,
+        strokeWidth: (selectedObjectId === obj.id || hoveredObjectId === obj.id) ? 3 : 1,
+        selectable: false,
+        hasControls: false,
+        id: obj.id, // Assign custom id to fabric object
       });
-
-      rect.fabricObject = fabricRect;
-      canvas.add(fabricRect);
+      editor.canvas.add(rect);
     });
 
-    canvas.renderAll();
+    editor.canvas.renderAll();
+  }, [editor, objects, selectedObjectId, hoveredObjectId]);
+
+  const getObjectDepth = (id: string, currentObjects: CanvasObject[]): number => {
+    const obj = currentObjects.find((o) => o.id === id);
+    if (!obj || !obj.parentId) {
+      return 0;
+    }
+    return 1 + getObjectDepth(obj.parentId, currentObjects);
   };
 
-  // Check if point is within 10px edge area
-  const isPointInEdge = (x: number, y: number, rect: Rectangle): boolean => {
-    const { position, size } = rect;
-    const edgeThreshold = 10;
+  const getAllDescendants = (parentId: string, currentObjects: CanvasObject[]): CanvasObject[] => {
+    const descendants: CanvasObject[] = [];
+    const children = currentObjects.filter(obj => obj.parentId === parentId);
     
-    // Check if point is inside rectangle
-    if (x < position.x || x > position.x + size.width ||
-        y < position.y || y > position.y + size.height) {
-      return false;
+    for (const child of children) {
+      descendants.push(child);
+      descendants.push(...getAllDescendants(child.id, currentObjects));
     }
-
-    // Check if point is in edge area (not in inner area)
-    const innerLeft = position.x + edgeThreshold;
-    const innerRight = position.x + size.width - edgeThreshold;
-    const innerTop = position.y + edgeThreshold;
-    const innerBottom = position.y + size.height - edgeThreshold;
-
-    // If inner area is too small, entire rectangle is edge
-    if (innerLeft >= innerRight || innerTop >= innerBottom) {
-      return true;
-    }
-
-    // Point is in edge if not in inner area
-    return !(x >= innerLeft && x <= innerRight && y >= innerTop && y <= innerBottom);
-  };
-
-  // Find topmost rectangle at point
-  const findRectangleAtPoint = (x: number, y: number): Rectangle | null => {
-    // Check in reverse order (topmost first)
-    for (let i = rectangles.length - 1; i >= 0; i--) {
-      if (isPointInEdge(x, y, rectangles[i])) {
-        return rectangles[i];
-      }
-    }
-    return null;
-  };
-
-  // Get all descendants of a rectangle
-  const getDescendants = (rect: Rectangle): Rectangle[] => {
-    const descendants: Rectangle[] = [];
-    
-    rect.childIds.forEach(childId => {
-      const child = rectangles.find(r => r.id === childId);
-      if (child) {
-        descendants.push(child);
-        descendants.push(...getDescendants(child));
-      }
-    });
     
     return descendants;
   };
 
-  // Move rectangle with constraints
-  const moveRectangle = (rect: Rectangle, deltaX: number, deltaY: number) => {
-    const parent = rectangles.find(r => r.id === rect.parentId);
-    
-    let newX = rect.position.x + deltaX;
-    let newY = rect.position.y + deltaY;
+  const isValidMove = (objId: string, newX: number, newY: number, currentObjects: CanvasObject[]): boolean => {
+    const obj = currentObjects.find(o => o.id === objId);
+    if (!obj) return false;
 
-    // Apply parent boundary constraints
-    if (parent) {
-      newX = Math.max(parent.position.x, 
-        Math.min(newX, parent.position.x + parent.size.width - rect.size.width));
-      newY = Math.max(parent.position.y, 
-        Math.min(newY, parent.position.y + parent.size.height - rect.size.height));
+    // Check canvas boundaries
+    if (newX < 0 || newY < 0 || newX + obj.width > 800 || newY + obj.height > 600) {
+      return false;
     }
 
-    const actualDeltaX = newX - rect.position.x;
-    const actualDeltaY = newY - rect.position.y;
-
-    // Move rectangle
-    rect.position.x = newX;
-    rect.position.y = newY;
-
-    // Move all descendants
-    const descendants = getDescendants(rect);
-    descendants.forEach(desc => {
-      desc.position.x += actualDeltaX;
-      desc.position.y += actualDeltaY;
-    });
-  };
-
-  // Smooth movement using Fabric.js objects directly
-  const moveRectangleSmooth = (rect: Rectangle, deltaX: number, deltaY: number) => {
-    const parent = rectangles.find(r => r.id === rect.parentId);
-    
-    let newX = rect.position.x + deltaX;
-    let newY = rect.position.y + deltaY;
-
-    // Apply parent boundary constraints
-    if (parent) {
-      newX = Math.max(parent.position.x, 
-        Math.min(newX, parent.position.x + parent.size.width - rect.size.width));
-      newY = Math.max(parent.position.y, 
-        Math.min(newY, parent.position.y + parent.size.height - rect.size.height));
-    }
-
-    const actualDeltaX = newX - rect.position.x;
-    const actualDeltaY = newY - rect.position.y;
-
-    // Skip if no actual movement
-    if (actualDeltaX === 0 && actualDeltaY === 0) {
-      return;
-    }
-
-    // Collect all objects that need updating
-    const objectsToUpdate: fabric.Rect[] = [];
-
-    // Update data model and collect Fabric objects
-    rect.position.x = newX;
-    rect.position.y = newY;
-    if (rect.fabricObject) {
-      rect.fabricObject.set({
-        left: newX,
-        top: newY
-      });
-      objectsToUpdate.push(rect.fabricObject);
-    }
-
-    // Move all descendants
-    const descendants = getDescendants(rect);
-    descendants.forEach(desc => {
-      desc.position.x += actualDeltaX;
-      desc.position.y += actualDeltaY;
-      
-      if (desc.fabricObject) {
-        desc.fabricObject.set({
-          left: desc.position.x,
-          top: desc.position.y
-        });
-        objectsToUpdate.push(desc.fabricObject);
+    // Check parent boundaries if parent exists
+    if (obj.parentId) {
+      const parent = currentObjects.find(o => o.id === obj.parentId);
+      if (parent) {
+        if (newX < parent.left || newY < parent.top || 
+            newX + obj.width > parent.left + parent.width || 
+            newY + obj.height > parent.top + parent.height) {
+          return false;
+        }
       }
-    });
-
-    // Update only the changed objects
-    if (fabricCanvas && objectsToUpdate.length > 0) {
-      // Use requestAnimationFrame for smooth updates
-      requestAnimationFrame(() => {
-        objectsToUpdate.forEach(obj => {
-          obj.setCoords(); // Update object coordinates for hit detection
-        });
-        fabricCanvas.renderAll();
-      });
-    }
-  };
-
-  // Calculate minimum size needed to contain all children
-  const getMinSizeForChildren = (rect: Rectangle): { width: number; height: number } => {
-    const children = rect.childIds
-      .map(id => rectangles.find(r => r.id === id))
-      .filter(child => child !== undefined) as Rectangle[];
-    
-    if (children.length === 0) {
-      return { width: 0, height: 0 };
     }
 
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    
-    children.forEach(child => {
-      minX = Math.min(minX, child.position.x);
-      minY = Math.min(minY, child.position.y);
-      maxX = Math.max(maxX, child.position.x + child.size.width);
-      maxY = Math.max(maxY, child.position.y + child.size.height);
-    });
-
-    return {
-      width: maxX - rect.position.x,
-      height: maxY - rect.position.y
-    };
+    return true;
   };
 
-  // Apply resize constraints
-  const applyResizeConstraints = (rect: Rectangle, newWidth: number, newHeight: number): { width: number; height: number } => {
-    let constrainedWidth = newWidth;
-    let constrainedHeight = newHeight;
-
-    // 1. Don't exceed parent boundaries
-    const parent = rectangles.find(r => r.id === rect.parentId);
-    if (parent) {
-      const maxWidth = parent.size.width - (rect.position.x - parent.position.x);
-      const maxHeight = parent.size.height - (rect.position.y - parent.position.y);
-      constrainedWidth = Math.min(constrainedWidth, maxWidth);
-      constrainedHeight = Math.min(constrainedHeight, maxHeight);
-    }
-
-    // 2. Don't shrink below children's bounding box
-    const minSize = getMinSizeForChildren(rect);
-    constrainedWidth = Math.max(constrainedWidth, minSize.width);
-    constrainedHeight = Math.max(constrainedHeight, minSize.height);
-
-    // 3. Minimum size constraints
-    constrainedWidth = Math.max(constrainedWidth, 20);
-    constrainedHeight = Math.max(constrainedHeight, 20);
-
-    return { width: constrainedWidth, height: constrainedHeight };
-  };
-
-  // Handle resize
-  const handleResize = (rect: Rectangle, newWidth: number, newHeight: number) => {
-    const constrainedSize = applyResizeConstraints(rect, newWidth, newHeight);
-    
-    // Update data model
-    rect.size.width = constrainedSize.width;
-    rect.size.height = constrainedSize.height;
-
-    // Update Fabric object
-    if (rect.fabricObject) {
-      rect.fabricObject.set({
-        width: constrainedSize.width,
-        height: constrainedSize.height,
-        scaleX: 1,
-        scaleY: 1
-      });
-      rect.fabricObject.setCoords();
-    }
-
-    // Note: Children sizes are NOT changed (as per requirements)
-    // Only the parent container is resized
-  };
-
-  // Handle mouse events
   useEffect(() => {
-    if (!fabricCanvas) return;
+    const canvas = editor?.canvas;
+    if (!canvas) return;
 
-    const handleMouseDown = (e: fabric.IEvent) => {
-      const pointer = fabricCanvas.getPointer(e.e);
-      
-      // If clicking on a Fabric object (resize handle), let Fabric handle it
-      if (e.target && e.target.type === 'rect') {
+    // Disable default drag selection box
+    canvas.selection = false;
+
+    const handleMouseDown = (e: fabric.TEvent) => {
+      const pointer = canvas.getPointer(e.e);
+      const clickedObjects = canvas.getObjects().filter((obj) => {
+        return obj.containsPoint(pointer);
+      });
+
+      if (clickedObjects.length === 0) {
+        setSelectedObjectId(null);
         return;
       }
-      
-      const clickedRect = findRectangleAtPoint(pointer.x, pointer.y);
 
-      if (clickedRect) {
-        setSelectedId(clickedRect.id);
-        setIsDragging(true);
-        setDragStart({ x: pointer.x, y: pointer.y });
-      } else {
-        setSelectedId(null);
-        setIsDragSelecting(true);
-        setDragStart({ x: pointer.x, y: pointer.y });
+      // Find the object with the greatest depth (the descendant-most)
+      const descendantMostObject = clickedObjects.reduce((prev, current) => {
+        const prevDepth = getObjectDepth(prev.id, objects);
+        const currentDepth = getObjectDepth(current.id, objects);
+        return prevDepth > currentDepth ? prev : current;
+      });
+
+      const newSelectedId = descendantMostObject.id;
+
+      // Always select the clicked object (no deselection on re-click)
+      setSelectedObjectId(newSelectedId);
+
+      // Prepare for potential dragging
+      const clickedObj = objects.find(obj => obj.id === newSelectedId);
+      if (clickedObj) {
+        // Calculate offset from object's top-left corner to click point
+        const objClickOffset = {
+          x: pointer.x - clickedObj.left,
+          y: pointer.y - clickedObj.top
+        };
+        setClickOffset(objClickOffset);
       }
+      
+      setDragCandidate(newSelectedId);
+      setDragStartPos(pointer);
+      setDragOffset({ x: 0, y: 0 });
     };
 
-    const handleMouseMove = (e: fabric.IEvent) => {
-      const pointer = fabricCanvas.getPointer(e.e);
-      
-      if (isDragging && selectedId && dragStart) {
-        const selectedRect = rectangles.find(r => r.id === selectedId);
-        if (selectedRect) {
-          const deltaX = pointer.x - dragStart.x;
-          const deltaY = pointer.y - dragStart.y;
-          
-          // Update positions without re-rendering entire canvas
-          moveRectangleSmooth(selectedRect, deltaX, deltaY);
-          setDragStart({ x: pointer.x, y: pointer.y });
+    const handleMouseMove = (e: fabric.TEvent) => {
+      const pointer = canvas.getPointer(e.e);
+
+      // Handle dragging logic
+      if (dragCandidate && dragStartPos) {
+        const dragDistance = Math.hypot(pointer.x - dragStartPos.x, pointer.y - dragStartPos.y);
+
+        if (!isDragging && dragDistance > 3) {
+          setIsDragging(true);
         }
-      } else if (isDragSelecting && dragStart) {
-        // Handle drag selection (simplified)
-        const selectionRect = {
-          x: Math.min(dragStart.x, pointer.x),
-          y: Math.min(dragStart.y, pointer.y),
-          width: Math.abs(pointer.x - dragStart.x),
-          height: Math.abs(pointer.y - dragStart.y)
-        };
-        
-        // Find rectangles fully contained in selection
-        const contained = rectangles.filter(rect => {
-          const corners = [
-            { x: rect.position.x, y: rect.position.y },
-            { x: rect.position.x + rect.size.width, y: rect.position.y },
-            { x: rect.position.x + rect.size.width, y: rect.position.y + rect.size.height },
-            { x: rect.position.x, y: rect.position.y + rect.size.height }
-          ];
-          
-          return corners.every(corner => 
-            corner.x >= selectionRect.x &&
-            corner.x <= selectionRect.x + selectionRect.width &&
-            corner.y >= selectionRect.y &&
-            corner.y <= selectionRect.y + selectionRect.height
-          );
-        });
-        
-        // Select topmost parent
-        if (contained.length > 0) {
-          const topmost = contained.reduce((top, current) => 
-            (!current.parentId || (top.parentId && current.parentId)) ? current : top
-          );
-          setSelectedId(topmost.id);
-        }
-      } else {
-        // Handle hover with throttling
-        const now = Date.now();
-        if (now - lastHoverUpdate > 16) { // ~60fps throttling
-          const hoveredRect = findRectangleAtPoint(pointer.x, pointer.y);
-          const newHoveredId = hoveredRect?.id || null;
-          
-          // Only update if hover actually changed
-          if (newHoveredId !== hoveredId) {
-            setHoveredId(newHoveredId);
+
+        if (isDragging) {
+          const selectedObj = objects.find(obj => obj.id === dragCandidate);
+          if (selectedObj) {
+            const newX = pointer.x - clickOffset.x;
+            const newY = pointer.y - clickOffset.y;
+
+            const actualOffset = {
+              x: newX - selectedObj.left,
+              y: newY - selectedObj.top,
+            };
+
+            if (isValidMove(dragCandidate, newX, newY, objects)) {
+              setDragOffset(actualOffset);
+            }
           }
-          setLastHoverUpdate(now);
+          return;
         }
       }
+
+      // Handle hover effect when not dragging
+      const hoveredObjects = canvas.getObjects().filter((obj) => {
+        return obj.containsPoint(pointer);
+      });
+
+      if (hoveredObjects.length === 0) {
+        setHoveredObjectId(null);
+        return;
+      }
+
+      // Find the object with the greatest depth (the descendant-most)
+      const descendantMostObject = hoveredObjects.reduce((prev, current) => {
+        const prevDepth = getObjectDepth(prev.id, objects);
+        const currentDepth = getObjectDepth(current.id, objects);
+        return prevDepth > currentDepth ? prev : current;
+      });
+
+      const newHoveredId = descendantMostObject.id;
+      setHoveredObjectId(newHoveredId);
     };
 
     const handleMouseUp = () => {
-      setIsDragging(false);
-      setIsDragSelecting(false);
-      setDragStart(null);
-    };
+      if (isDragging && dragCandidate && (dragOffset.x !== 0 || dragOffset.y !== 0)) {
+        // Apply the drag offset to selected object and all descendants
+        const selectedObj = objects.find(obj => obj.id === dragCandidate);
+        if (selectedObj && dragCandidate) {
+          const descendants = getAllDescendants(dragCandidate, objects);
+          const objectsToMove = [selectedObj, ...descendants];
 
-    // Handle object scaling (resize)
-    const handleObjectScaling = (e: fabric.IEvent) => {
-      const target = e.target as fabric.Rect;
-      if (!target) return;
-
-      // Find the corresponding rectangle
-      const rect = rectangles.find(r => r.fabricObject === target);
-      if (!rect) return;
-
-      // Calculate new size
-      const newWidth = target.width! * target.scaleX!;
-      const newHeight = target.height! * target.scaleY!;
-
-      // Apply constraints and update
-      handleResize(rect, newWidth, newHeight);
-    };
-
-    // Handle object selection from Fabric
-    const handleObjectSelection = (e: fabric.IEvent) => {
-      const target = e.target as fabric.Rect;
-      if (!target) return;
-
-      const rect = rectangles.find(r => r.fabricObject === target);
-      if (rect) {
-        setSelectedId(rect.id);
-      }
-    };
-
-    fabricCanvas.on('mouse:down', handleMouseDown);
-    fabricCanvas.on('mouse:move', handleMouseMove);
-    fabricCanvas.on('mouse:up', handleMouseUp);
-    fabricCanvas.on('object:scaling', handleObjectScaling);
-    fabricCanvas.on('selection:created', handleObjectSelection);
-    fabricCanvas.on('selection:updated', handleObjectSelection);
-
-    return () => {
-      fabricCanvas.off('mouse:down', handleMouseDown);
-      fabricCanvas.off('mouse:move', handleMouseMove);
-      fabricCanvas.off('mouse:up', handleMouseUp);
-      fabricCanvas.off('object:scaling', handleObjectScaling);
-      fabricCanvas.off('selection:created', handleObjectSelection);
-      fabricCanvas.off('selection:updated', handleObjectSelection);
-    };
-  }, [fabricCanvas, rectangles, selectedId, isDragging, isDragSelecting, dragStart]);
-
-  // Update visual state when selection/hover changes
-  useEffect(() => {
-    if (!fabricCanvas) return;
-
-    const changedObjects: fabric.Rect[] = [];
-
-    // Update stroke width only for changed objects
-    rectangles.forEach(rect => {
-      if (rect.fabricObject) {
-        const wasSelected = rect.selected;
-        const wasHovered = rect.hovered;
-        const isSelected = rect.id === selectedId;
-        const isHovered = rect.id === hoveredId;
-        
-        // Only update if state actually changed
-        if (wasSelected !== isSelected || wasHovered !== isHovered) {
-          const strokeWidth = (isSelected || isHovered) ? 3 : 1;
-          rect.fabricObject.set({
-            strokeWidth: strokeWidth,
-            selectable: isSelected,
-            evented: isSelected,
-            hasControls: isSelected,
-            hasBorders: isSelected
-          });
-          rect.selected = isSelected;
-          rect.hovered = isHovered;
-          changedObjects.push(rect.fabricObject);
+          setObjects(prevObjects => 
+            prevObjects.map(obj => {
+              if (objectsToMove.some(moveObj => moveObj.id === obj.id)) {
+                return {
+                  ...obj,
+                  left: obj.left + dragOffset.x,
+                  top: obj.top + dragOffset.y
+                };
+              }
+              return obj;
+            })
+          );
         }
       }
-    });
 
-    // Only render if something actually changed
-    if (changedObjects.length > 0) {
-      requestAnimationFrame(() => {
-        changedObjects.forEach(obj => {
-          obj.setCoords();
-        });
-        fabricCanvas.renderAll();
-      });
-    }
-  }, [selectedId, hoveredId, fabricCanvas]);
+      setIsDragging(false);
+      setDragCandidate(null);
+      setDragStartPos(null);
+      setDragOffset({ x: 0, y: 0 });
+      setClickOffset({ x: 0, y: 0 });
+    };
 
-  // Set cursor based on interaction state
-  useEffect(() => {
-    if (!fabricCanvas) return;
+    canvas.on('mouse:down', handleMouseDown);
+    canvas.on('mouse:move', handleMouseMove);
+    canvas.on('mouse:up', handleMouseUp);
 
-    if (isDragging) {
-      fabricCanvas.defaultCursor = 'grabbing';
-    } else if (isDragSelecting) {
-      fabricCanvas.defaultCursor = 'crosshair';
-    } else if (hoveredId) {
-      fabricCanvas.defaultCursor = 'grab';
-    } else {
-      fabricCanvas.defaultCursor = 'default';
-    }
-  }, [isDragging, isDragSelecting, hoveredId, fabricCanvas]);
+    return () => {
+      canvas.off('mouse:down', handleMouseDown);
+      canvas.off('mouse:move', handleMouseMove);
+      canvas.off('mouse:up', handleMouseUp);
+    };
+  }, [editor, objects, selectedObjectId, isDragging, dragStartPos, dragOffset, hoveredObjectId, dragCandidate, clickOffset]);
 
   return (
     <div style={{ padding: '20px', textAlign: 'center' }}>
-      <h2>Hierarchical Canvas Editor</h2>
-      <div style={{ 
-        display: 'inline-block', 
-        border: '1px solid #ccc', 
-        borderRadius: '4px' 
-      }}>
-        <canvas ref={canvasRef} />
-      </div>
-      
-      <div style={{ marginTop: '20px', fontSize: '14px', color: '#666' }}>
-        <p>• Click rectangle edges (10px area) to select</p>
-        <p>• Drag to move (children follow parents)</p>
-        <p>• Drag resize handles to resize (with constraints)</p>
-        <p>• Drag empty space to select multiple</p>
-        <p>• Children stay within parent boundaries</p>
-      </div>
-      
-      {process.env.NODE_ENV === 'development' && (
-        <div style={{ 
-          marginTop: '20px', 
-          padding: '10px', 
-          backgroundColor: '#f5f5f5',
+      <h2>Canvas Editor</h2>
+      <div
+        style={{
+          display: 'inline-block',
+          border: '1px solid #ccc',
           borderRadius: '4px',
-          fontSize: '12px'
-        }}>
-          <div>Selected: {selectedId || 'None'}</div>
-          <div>Hovered: {hoveredId || 'None'}</div>
-          <div>Dragging: {isDragging ? 'Yes' : 'No'}</div>
-          <div>Drag Selecting: {isDragSelecting ? 'Yes' : 'No'}</div>
-        </div>
-      )}
+        }}
+      >
+        <FabricJSCanvas className="sample-canvas" onReady={handleReady} />
+      </div>
     </div>
   );
 };
