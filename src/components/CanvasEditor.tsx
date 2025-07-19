@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useFabricJSEditor, FabricJSCanvas } from 'fabricjs-react';
 import * as fabric from 'fabric';
 
+
 // 1. 데이터 구조 정의 (TypeScript Interface)
 interface CanvasObject {
 	id: string; // 고유 식별자
@@ -50,23 +51,18 @@ const initialObjects: CanvasObject[] = [
 
 export const CanvasEditor = () => {
 	const { editor, onReady } = useFabricJSEditor();
-	const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
+	const [objects, setObjects] = useState<CanvasObject[]>(initialObjects);
 	const [hoveredObjectId, setHoveredObjectId] = useState<string | null>(null);
-	const [isDragging, setIsDragging] = useState(false);
-	const [dragStartPos, setDragStartPos] = useState<{ x: number; y: number } | null>(null);
-	const [dragCandidate, setDragCandidate] = useState<string | null>(null);
-	const [clickOffset, setClickOffset] = useState<{ x: number; y: number }>({
-		x: 0,
-		y: 0,
-	});
 
 	// Store references to fabric objects for direct manipulation
 	const fabricObjectsRef = useRef<Map<string, fabric.Rect>>(new Map());
-	const originalPositionsRef = useRef<Map<string, { left: number; top: number }>>(
-		new Map()
-	);
 
-	const [objects, setObjects] = useState<CanvasObject[]>(initialObjects);
+	// Track current operation to prevent conflicts
+	const currentOperationRef = useRef<'moving' | 'scaling' | null>(null);
+	// Track if mouse is over the canvas
+	const mouseIsOverCanvas = useRef(true);
+	// Track which corner is being used for scaling
+	const scalingCornerRef = useRef<string | null>(null);
 
 	const handleReady = (canvas: fabric.Canvas) => {
 		canvas.setDimensions({ width: 800, height: 600 });
@@ -75,12 +71,10 @@ export const CanvasEditor = () => {
 
 	// 3. React 상태와 Fabric.js 캔버스 동기화
 	useEffect(() => {
-		if (!editor?.canvas) {
-			return;
-		}
+		const canvas = editor?.canvas;
+		if (!canvas) return;
 
-		// 캔버스를 비우고 상태 기반으로 다시 렌더링
-		editor.canvas.clear();
+		canvas.clear();
 		fabricObjectsRef.current.clear();
 
 		objects.forEach((obj) => {
@@ -91,19 +85,37 @@ export const CanvasEditor = () => {
 				height: obj.height,
 				fill: obj.fill,
 				stroke: obj.stroke,
-				strokeWidth: selectedObjectId === obj.id || hoveredObjectId === obj.id ? 3 : 1,
-				selectable: false,
-				hasControls: false,
-				id: obj.id, // Assign custom id to fabric object
+				strokeWidth: 1,
+				selectable: true,
+				hasControls: true,
+				hasBorders: true,
+				// Remove rotation control
+				hasRotatingPoint: false,
+				// Basic scaling constraints
+				minScaleLimit: 0.1,
+				lockScalingFlip: true,
+				id: obj.id,
 			});
 
-			// Store reference to fabric object
 			fabricObjectsRef.current.set(obj.id, rect);
-			editor.canvas.add(rect);
+			canvas.add(rect);
 		});
 
-		editor.canvas.renderAll();
-	}, [editor, objects, selectedObjectId, hoveredObjectId]);
+		canvas.renderAll();
+	}, [editor, objects]);
+
+	// Effect to handle hover highlights
+	useEffect(() => {
+		const canvas = editor?.canvas;
+		if (!canvas) return;
+
+		canvas.getObjects().forEach((obj: any) => {
+			const isHovered = obj.id === hoveredObjectId;
+			obj.set('strokeWidth', isHovered ? 3 : 1);
+		});
+
+		canvas.renderAll();
+	}, [editor, hoveredObjectId]);
 
 	const getObjectDepth = (id: string, currentObjects: CanvasObject[]): number => {
 		const obj = currentObjects.find((o) => o.id === id);
@@ -128,253 +140,313 @@ export const CanvasEditor = () => {
 		return descendants;
 	};
 
-	const isValidMove = (
-		objId: string,
-		newX: number,
-		newY: number,
-		currentObjects: CanvasObject[]
-	): boolean => {
-		const obj = currentObjects.find((o) => o.id === objId);
-		if (!obj) return false;
-
-		// Check canvas boundaries
-		if (newX < 0 || newY < 0 || newX + obj.width > 800 || newY + obj.height > 600) {
-			return false;
+	// Common boundary checking function for both moving and scaling
+	const getBoundaryConstraints = (targetObj: CanvasObject) => {
+		const parentObj = targetObj.parentId ? objects.find((o) => o.id === targetObj.parentId) : null;
+		
+		if (parentObj) {
+			// Constrain within parent boundaries
+			return {
+				minLeft: parentObj.left,
+				minTop: parentObj.top,
+				maxRight: parentObj.left + parentObj.width,
+				maxBottom: parentObj.top + parentObj.height
+			};
+		} else {
+			// Constrain within canvas boundaries
+			return {
+				minLeft: 0,
+				minTop: 0,
+				maxRight: 800,
+				maxBottom: 600
+			};
 		}
-
-		// Check parent boundaries if parent exists
-		if (obj.parentId) {
-			const parent = currentObjects.find((o) => o.id === obj.parentId);
-			if (parent) {
-				if (
-					newX < parent.left ||
-					newY < parent.top ||
-					newX + obj.width > parent.left + parent.width ||
-					newY + obj.height > parent.top + parent.height
-				) {
-					return false;
-				}
-			}
-		}
-
-		return true;
 	};
 
-	// Throttled function to update visual feedback during drag
-	const updateDragVisuals = useCallback(
-		(draggedObjects: { id: string; newLeft: number; newTop: number }[]) => {
-			draggedObjects.forEach(({ id, newLeft, newTop }) => {
-				const fabricObj = fabricObjectsRef.current.get(id);
-				if (fabricObj) {
-					fabricObj.set({
-						left: newLeft,
-						top: newTop,
-					});
-				}
-			});
-
-			if (editor?.canvas) {
-				editor.canvas.renderAll();
-			}
-		},
-		[editor]
-	);
 
 	useEffect(() => {
 		const canvas = editor?.canvas;
 		if (!canvas) return;
 
-		// Disable default drag selection box
-		canvas.selection = false;
+		// Enable native Fabric.js selection
+		canvas.selection = true;
 
-		const handleMouseDown = (e: fabric.TEvent) => {
-			const pointer = canvas.getPointer(e.e);
-			const clickedObjects = canvas.getObjects().filter((obj) => {
-				return obj.containsPoint(pointer);
-			});
+		// Handle mouse down to detect control handle interactions
+		const handleMouseDown = (e: any) => {
+			const target = e.target;
+			if (!target) return;
 
-			if (clickedObjects.length === 0) {
-				setSelectedObjectId(null);
-				return;
-			}
-
-			// Find the object with the greatest depth (the descendant-most)
-			const descendantMostObject = clickedObjects.reduce((prev, current) => {
-				const prevDepth = getObjectDepth(prev.id, objects);
-				const currentDepth = getObjectDepth(current.id, objects);
-				return prevDepth > currentDepth ? prev : current;
-			});
-
-			const newSelectedId = descendantMostObject.id;
-
-			// Always select the clicked object (no deselection on re-click)
-			setSelectedObjectId(newSelectedId);
-
-			// Prepare for potential dragging
-			const clickedObj = objects.find((obj) => obj.id === newSelectedId);
-			if (clickedObj) {
-				// Calculate offset from object's top-left corner to click point
-				const objClickOffset = {
-					x: pointer.x - clickedObj.left,
-					y: pointer.y - clickedObj.top,
-				};
-				setClickOffset(objClickOffset);
-			}
-
-			setDragCandidate(newSelectedId);
-			setDragStartPos(pointer);
-			setIsDragging(false);
+			// Reset operation state on new interaction
+			currentOperationRef.current = null;
 		};
 
-		const handleMouseMove = (e: fabric.TEvent) => {
-			const pointer = canvas.getPointer(e.e);
-
-			// Handle dragging logic
-			if (dragCandidate && dragStartPos) {
-				const dragDistance = Math.hypot(
-					pointer.x - dragStartPos.x,
-					pointer.y - dragStartPos.y
-				);
-
-				if (!isDragging && dragDistance > 3) {
-					setIsDragging(true);
-					// Store original positions when drag starts
-					const selectedObj = objects.find((obj) => obj.id === dragCandidate);
-					if (selectedObj) {
-						const descendants = getAllDescendants(dragCandidate, objects);
-						const objectsToMove = [selectedObj, ...descendants];
-
-						originalPositionsRef.current.clear();
-						objectsToMove.forEach((obj) => {
-							originalPositionsRef.current.set(obj.id, { left: obj.left, top: obj.top });
-						});
-					}
-				}
-
-				if (isDragging) {
-					const selectedObj = objects.find((obj) => obj.id === dragCandidate);
-					if (selectedObj) {
-						const newX = pointer.x - clickOffset.x;
-						const newY = pointer.y - clickOffset.y;
-
-						// Calculate offset from original position
-						const offsetX = newX - selectedObj.left;
-						const offsetY = newY - selectedObj.top;
-
-						// Check if move is valid before applying
-						if (isValidMove(dragCandidate, newX, newY, objects)) {
-							// Get all objects to move (selected + descendants)
-							const descendants = getAllDescendants(dragCandidate, objects);
-							const objectsToMove = [selectedObj, ...descendants];
-
-							// Prepare drag updates for direct fabric manipulation
-							const draggedObjects = objectsToMove.map((obj) => ({
-								id: obj.id,
-								newLeft: obj.left + offsetX,
-								newTop: obj.top + offsetY,
-							}));
-
-							// Update fabric objects directly (no React state update)
-							updateDragVisuals(draggedObjects);
-						}
-					}
-					return;
-				}
+		// Handle when scaling starts
+		const handleScalingStart = (e: any) => {
+			currentOperationRef.current = 'scaling';
+			if (e.transform && e.transform.corner) {
+				scalingCornerRef.current = e.transform.corner;
 			}
-
-			// Handle hover effect when not dragging
-			const hoveredObjects = canvas.getObjects().filter((obj) => {
-				return obj.containsPoint(pointer);
-			});
-
-			if (hoveredObjects.length === 0) {
-				setHoveredObjectId(null);
-				return;
-			}
-
-			// Find the object with the greatest depth (the descendant-most)
-			const descendantMostObject = hoveredObjects.reduce((prev, current) => {
-				const prevDepth = getObjectDepth(prev.id, objects);
-				const currentDepth = getObjectDepth(current.id, objects);
-				return prevDepth > currentDepth ? prev : current;
-			});
-
-			const newHoveredId = descendantMostObject.id;
-			setHoveredObjectId(newHoveredId);
 		};
 
-		const handleMouseUp = () => {
-			if (isDragging && dragCandidate) {
-				// Get final positions from fabric objects and update React state
-				const selectedObj = objects.find((obj) => obj.id === dragCandidate);
-				if (selectedObj) {
-					const descendants = getAllDescendants(dragCandidate, objects);
-					const objectsToMove = [selectedObj, ...descendants];
+		// Simple scaling constraint using events
+		const handleObjectScaling = (e: any) => {
+			const target = e.target;
+			if (!target || !target.id) return;
 
-					// Check if any object actually moved
-					let hasMoved = false;
-					const updates = objectsToMove.map((obj) => {
-						const fabricObj = fabricObjectsRef.current.get(obj.id);
-						const originalPos = originalPositionsRef.current.get(obj.id);
+			const targetObj = objects.find(o => o.id === target.id);
+			if (!targetObj) return;
 
-						if (fabricObj && originalPos) {
-							const newLeft = fabricObj.left || obj.left;
-							const newTop = fabricObj.top || obj.top;
+			// Get the bounding rect of the scaled object
+			const boundingRect = target.getBoundingRect();
+			const constraints = getBoundaryConstraints(targetObj);
 
-							if (
-								Math.abs(newLeft - originalPos.left) > 1 ||
-								Math.abs(newTop - originalPos.top) > 1
-							) {
-								hasMoved = true;
-							}
+			// Check boundaries
+			if (boundingRect.left < constraints.minLeft ||
+				boundingRect.top < constraints.minTop ||
+				boundingRect.left + boundingRect.width > constraints.maxRight ||
+				boundingRect.top + boundingRect.height > constraints.maxBottom) {
+				
+				// Constrain the scale to fit within boundaries
+				const maxScaleX = (constraints.maxRight - constraints.minLeft) / target.width;
+				const maxScaleY = (constraints.maxBottom - constraints.minTop) / target.height;
+				
+				const constrainedScaleX = Math.min(target.scaleX, maxScaleX);
+				const constrainedScaleY = Math.min(target.scaleY, maxScaleY);
+				
+				target.set({
+					scaleX: Math.max(0.1, constrainedScaleX),
+					scaleY: Math.max(0.1, constrainedScaleY)
+				});
+				
+				// Ensure position stays within bounds
+				const newBoundingRect = target.getBoundingRect();
+				let adjustedLeft = target.left;
+				let adjustedTop = target.top;
+				
+				if (newBoundingRect.left < constraints.minLeft) {
+					adjustedLeft = target.left + (constraints.minLeft - newBoundingRect.left);
+				}
+				if (newBoundingRect.top < constraints.minTop) {
+					adjustedTop = target.top + (constraints.minTop - newBoundingRect.top);
+				}
+				if (newBoundingRect.left + newBoundingRect.width > constraints.maxRight) {
+					adjustedLeft = target.left - ((newBoundingRect.left + newBoundingRect.width) - constraints.maxRight);
+				}
+				if (newBoundingRect.top + newBoundingRect.height > constraints.maxBottom) {
+					adjustedTop = target.top - ((newBoundingRect.top + newBoundingRect.height) - constraints.maxBottom);
+				}
+				
+				target.set({
+					left: adjustedLeft,
+					top: adjustedTop
+				});
+				
+				target.setCoords();
+			}
+		};
 
-							return {
-								id: obj.id,
-								left: newLeft,
-								top: newTop,
-							};
-						}
-						return { id: obj.id, left: obj.left, top: obj.top };
+		// Handle object moving (during drag)
+		const handleObjectMoving = (e: any) => {
+			if (!mouseIsOverCanvas.current) return;
+			const target = e.target;
+			if (!target || !(target as any).id) return;
+
+			// Set operation state to moving
+			currentOperationRef.current = 'moving';
+
+			const targetId = (target as any).id;
+			const targetObj = objects.find((o) => o.id === targetId);
+			if (!targetObj) return;
+
+			// Apply boundary constraints to the target object using common function
+			const constraints = getBoundaryConstraints(targetObj);
+			const constrainedLeft = Math.max(
+				constraints.minLeft,
+				Math.min(target.left, constraints.maxRight - targetObj.width)
+			);
+			const constrainedTop = Math.max(
+				constraints.minTop,
+				Math.min(target.top, constraints.maxBottom - targetObj.height)
+			);
+
+			// Update target position if it was constrained
+			if (constrainedLeft !== target.left || constrainedTop !== target.top) {
+				target.set({
+					left: constrainedLeft,
+					top: constrainedTop,
+				});
+				target.setCoords();
+			}
+
+			// Recalculate delta based on constrained position
+			const finalDeltaX = constrainedLeft - targetObj.left;
+			const finalDeltaY = constrainedTop - targetObj.top;
+
+			// Move all descendants with the parent using the same delta
+			const descendants = getAllDescendants(targetId, objects);
+			descendants.forEach((descendant) => {
+				const fabricObj = fabricObjectsRef.current.get(descendant.id);
+				if (fabricObj && fabricObj !== target) {
+					const newLeft = descendant.left + finalDeltaX;
+					const newTop = descendant.top + finalDeltaY;
+
+					fabricObj.set({
+						left: newLeft,
+						top: newTop,
 					});
-
-					// Only update React state if objects actually moved
-					if (hasMoved) {
-						setObjects((prevObjects) =>
-							prevObjects.map((obj) => {
-								const update = updates.find((u) => u.id === obj.id);
-								return update ? { ...obj, left: update.left, top: update.top } : obj;
-							})
-						);
-					}
+					fabricObj.setCoords();
 				}
+			});
+
+			canvas.renderAll();
+		};
+
+		// Handle object moved (after drag completes)
+		const handleObjectModified = (e: any) => {
+			if (!mouseIsOverCanvas.current) return;
+			const target = e.target;
+			if (!target || !(target as any).id) return;
+
+			console.log('[DEBUG SCALING SESSION END]', {
+				objectId: target.id,
+				operation: currentOperationRef.current,
+				finalPosition: {
+					left: target.left,
+					top: target.top,
+					width: target.width,
+					height: target.height,
+					scaleX: target.scaleX,
+					scaleY: target.scaleY
+				},
+				boundingRect: target.getBoundingRect()
+			});
+
+			// Always bake in scale if not 1
+			let updatedWidth = target.width;
+			let updatedHeight = target.height;
+			if (Math.abs(target.scaleX - 1) > 0.001 || Math.abs(target.scaleY - 1) > 0.001) {
+				updatedWidth = target.width * target.scaleX;
+				updatedHeight = target.height * target.scaleY;
+				
+				target.set({
+					width: updatedWidth,
+					height: updatedHeight,
+					scaleX: 1,
+					scaleY: 1,
+				});
+				target.setCoords();
+				
+				console.log('[DEBUG SCALE BAKED]', {
+					objectId: target.id,
+					bakedDimensions: {
+						width: updatedWidth,
+						height: updatedHeight
+					}
+				});
 			}
 
-			setIsDragging(false);
-			setDragCandidate(null);
-			setDragStartPos(null);
-			setClickOffset({ x: 0, y: 0 });
-			originalPositionsRef.current.clear();
+			// Clear operation state
+			currentOperationRef.current = null;
+			scalingCornerRef.current = null;
+
+			const targetId = (target as any).id;
+			const descendants = getAllDescendants(targetId, objects);
+
+			const updates = [targetId, ...descendants.map((d) => d.id)]
+				.map((id) => {
+					const fabricObj = fabricObjectsRef.current.get(id);
+					if (!fabricObj) return null;
+					if (id === targetId) {
+						return {
+							id,
+							left: fabricObj.left || 0,
+							top: fabricObj.top || 0,
+							width: fabricObj.width,
+							height: fabricObj.height,
+						};
+					}
+					return {
+						id,
+						left: fabricObj.left || 0,
+						top: fabricObj.top || 0,
+					};
+				})
+				.filter(Boolean);
+
+			setObjects((prevObjects) =>
+				prevObjects.map((obj) => {
+					const update = updates.find((u: any) => u.id === obj.id);
+					if (!update) return obj;
+					return {
+						...obj,
+						left: update.left,
+						top: update.top,
+						width: update.width !== undefined ? update.width : obj.width,
+						height: update.height !== undefined ? update.height : obj.height,
+					};
+				})
+			);
 		};
+
+		// Handle mouse over for hover effects
+		const handleMouseOver = (e: any) => {
+			const target = e.target;
+			if (target && (target as any).id) {
+				setHoveredObjectId((target as any).id);
+			}
+		};
+
+		// Handle mouse out
+		const handleMouseOut = () => {
+			setHoveredObjectId(null);
+		};
+
 
 		canvas.on('mouse:down', handleMouseDown);
-		canvas.on('mouse:move', handleMouseMove);
-		canvas.on('mouse:up', handleMouseUp);
+		canvas.on('object:scaling', handleScalingStart);
+		canvas.on('object:scaling', handleObjectScaling);
+		canvas.on('object:moving', handleObjectMoving);
+		canvas.on('object:modified', handleObjectModified);
+		canvas.on('mouse:over', handleMouseOver);
+		canvas.on('mouse:out', handleMouseOut);
+
+		// Mouse enter/leave tracking for canvas
+		const canvasElement = canvas.getElement ? canvas.getElement() : canvas.lowerCanvasEl;
+		const handleMouseLeave = () => {
+			mouseIsOverCanvas.current = false;
+			if (
+				currentOperationRef.current === 'scaling' ||
+				currentOperationRef.current === 'moving'
+			) {
+				// Force operation to stop by firing object:modified
+				const activeObj = canvas.getActiveObject();
+				if (activeObj) {
+					canvas.fire('object:modified', { target: activeObj });
+					canvas.discardActiveObject();
+				}
+				currentOperationRef.current = null;
+			}
+		};
+		const handleMouseEnter = () => {
+			mouseIsOverCanvas.current = true;
+		};
+		canvasElement.addEventListener('mouseleave', handleMouseLeave);
+		canvasElement.addEventListener('mouseenter', handleMouseEnter);
 
 		return () => {
 			canvas.off('mouse:down', handleMouseDown);
-			canvas.off('mouse:move', handleMouseMove);
-			canvas.off('mouse:up', handleMouseUp);
+			canvas.off('object:scaling', handleScalingStart);
+			canvas.off('object:scaling', handleObjectScaling);
+			canvas.off('object:moving', handleObjectMoving);
+			canvas.off('object:modified', handleObjectModified);
+			canvas.off('mouse:over', handleMouseOver);
+			canvas.off('mouse:out', handleMouseOut);
+			const canvasElement =
+				canvas.getElement ? canvas.getElement() : canvas.lowerCanvasEl;
+			canvasElement.removeEventListener('mouseleave', handleMouseLeave);
+			canvasElement.removeEventListener('mouseenter', handleMouseEnter);
 		};
-	}, [
-		editor,
-		objects,
-		selectedObjectId,
-		isDragging,
-		dragStartPos,
-		hoveredObjectId,
-		dragCandidate,
-		clickOffset,
-	]);
+	}, [editor, objects]);
 
 	return (
 		<div style={{ padding: '20px', textAlign: 'center' }}>
