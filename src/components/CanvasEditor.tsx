@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useFabricJSEditor, FabricJSCanvas } from 'fabricjs-react';
 import * as fabric from 'fabric';
-
+import { FabricJSCanvas, useFabricJSEditor } from 'fabricjs-react';
+import { useEffect, useRef, useState } from 'react';
 
 // 1. 데이터 구조 정의 (TypeScript Interface)
 interface CanvasObject {
@@ -58,11 +57,39 @@ export const CanvasEditor = () => {
 	const fabricObjectsRef = useRef<Map<string, fabric.Rect>>(new Map());
 
 	// Track current operation to prevent conflicts
-	const currentOperationRef = useRef<'moving' | 'scaling' | null>(null);
+	const currentOperationRef = useRef<'moving' | 'scaling' | 'selecting' | null>(null);
 	// Track if mouse is over the canvas
 	const mouseIsOverCanvas = useRef(true);
 	// Track which corner is being used for scaling
 	const scalingCornerRef = useRef<string | null>(null);
+
+	// Drag selection state - using refs for immediate synchronous access
+	const isSelectingRef = useRef<boolean>(false);
+	const selectionStartRef = useRef<{ x: number; y: number } | null>(null);
+	const selectionEndRef = useRef<{ x: number; y: number } | null>(null);
+	const [isSelecting, setIsSelecting] = useState<boolean>(false);
+	const [selectionStart, setSelectionStart] = useState<{ x: number; y: number } | null>(
+		null
+	);
+	const [selectionEnd, setSelectionEnd] = useState<{ x: number; y: number } | null>(null);
+
+	// Two-step selection state - using refs for immediate synchronous access
+	const selectedObjectIdRef = useRef<string | null>(null);
+	const isDragReadyRef = useRef<boolean>(false);
+
+
+	// Track potential drag selection start
+	const potentialDragStartRef = useRef<{ x: number; y: number; target: any } | null>(
+		null
+	);
+
+	// Track click start for deselection detection
+	const clickStartRef = useRef<{
+		x: number;
+		y: number;
+		time: number;
+		targetId: string;
+	} | null>(null);
 
 	const handleReady = (canvas: fabric.Canvas) => {
 		canvas.setDimensions({ width: 800, height: 600 });
@@ -89,12 +116,21 @@ export const CanvasEditor = () => {
 				selectable: true,
 				hasControls: true,
 				hasBorders: true,
-				// Remove rotation control
+				// Remove rotation control completely
 				hasRotatingPoint: false,
+				lockRotation: true,
+				// Two-step selection: start with movement locked
+				lockMovementX: true,
+				lockMovementY: true,
 				// Basic scaling constraints
 				minScaleLimit: 0.1,
 				lockScalingFlip: true,
 				id: obj.id,
+			});
+
+			// Explicitly hide the rotation control
+			rect.setControlsVisibility({
+				mtr: false, // mtr = middle top rotate
 			});
 
 			fabricObjectsRef.current.set(obj.id, rect);
@@ -142,15 +178,16 @@ export const CanvasEditor = () => {
 
 	// Common boundary checking function for both moving and scaling
 	const getBoundaryConstraints = (targetObj: CanvasObject) => {
-		const parentObj = targetObj.parentId ? objects.find((o) => o.id === targetObj.parentId) : null;
-		
+		const parentObj =
+			targetObj.parentId ? objects.find((o) => o.id === targetObj.parentId) : null;
+
 		if (parentObj) {
 			// Constrain within parent boundaries
 			return {
 				minLeft: parentObj.left,
 				minTop: parentObj.top,
 				maxRight: parentObj.left + parentObj.width,
-				maxBottom: parentObj.top + parentObj.height
+				maxBottom: parentObj.top + parentObj.height,
 			};
 		} else {
 			// Constrain within canvas boundaries
@@ -158,26 +195,317 @@ export const CanvasEditor = () => {
 				minLeft: 0,
 				minTop: 0,
 				maxRight: 800,
-				maxBottom: 600
+				maxBottom: 600,
 			};
 		}
 	};
-
 
 	useEffect(() => {
 		const canvas = editor?.canvas;
 		if (!canvas) return;
 
-		// Enable native Fabric.js selection
-		canvas.selection = true;
+		// Disable native Fabric.js selection to implement custom selection
+		canvas.selection = false;
 
-		// Handle mouse down to detect control handle interactions
+		// Handle mouse down to detect control handle interactions and start drag selection
 		const handleMouseDown = (e: any) => {
 			const target = e.target;
-			if (!target) return;
+			const pointer = canvas.getPointer(e.e);
 
-			// Reset operation state on new interaction
+			// Always track potential drag selection start
+			potentialDragStartRef.current = { x: pointer.x, y: pointer.y, target };
+
+			// If clicking on empty canvas, immediately start drag selection
+			if (!target) {
+				// Clear any existing selection and lock all objects
+				selectedObjectIdRef.current = null;
+				isDragReadyRef.current = false;
+				isSelectingRef.current = false;
+				selectionStartRef.current = null;
+				setIsSelecting(false);
+				setSelectionStart(null);
+				setSelectionEnd(null);
+				canvas.discardActiveObject();
+
+				// Lock movement for all objects
+				canvas.getObjects().forEach((obj: any) => {
+					if (obj.id) {
+						obj.set({ lockMovementX: true, lockMovementY: true });
+					}
+				});
+
+				setIsSelecting(true);
+				setSelectionStart({ x: pointer.x, y: pointer.y });
+				setSelectionEnd({ x: pointer.x, y: pointer.y });
+				currentOperationRef.current = 'selecting';
+				return;
+			}
+
+			// Handle object interaction with two-step selection
+			const targetId = (target as any).id;
+			if (targetId) {
+
+
+				// First click: select the object but lock movement (don't show resize handles yet)
+				if (selectedObjectIdRef.current !== targetId) {
+
+					// Lock movement for all objects first
+					canvas.getObjects().forEach((obj: any) => {
+						if (obj.id) {
+							obj.set({ lockMovementX: true, lockMovementY: true });
+						}
+					});
+
+					// Update refs immediately
+					selectedObjectIdRef.current = targetId;
+					isDragReadyRef.current = false;
+
+					// Don't set active object yet - wait for mouseup
+					canvas.discardActiveObject();
+					canvas.renderAll();
+					currentOperationRef.current = null;
+
+					return;
+				}
+
+				// Second mousedown: enable dragging for this object
+				if (selectedObjectIdRef.current === targetId && !isDragReadyRef.current) {
+
+					// Update refs immediately
+					isDragReadyRef.current = true;
+
+					// Unlock movement for this specific object immediately
+					target.set({
+						lockMovementX: false,
+						lockMovementY: false,
+						selectable: true,
+						evented: true,
+					});
+					target.setCoords();
+					canvas.renderAll();
+
+					// Don't return here - allow the drag to start
+				}
+
+				// Handle case where object is drag-ready but still locked (after canvas deselection)
+				if (
+					selectedObjectIdRef.current === targetId &&
+					isDragReadyRef.current &&
+					(target.lockMovementX || target.lockMovementY)
+				) {
+
+					// Unlock movement for this specific object
+					target.set({
+						lockMovementX: false,
+						lockMovementY: false,
+						selectable: true,
+						evented: true,
+					});
+					target.setCoords();
+					canvas.renderAll();
+
+				}
+
+				// Track click start for potential deselection (when object is already selected and drag-ready)
+				if (selectedObjectIdRef.current === targetId && isDragReadyRef.current) {
+					clickStartRef.current = {
+						x: pointer.x,
+						y: pointer.y,
+						time: Date.now(),
+						targetId: targetId,
+					};
+
+				}
+			}
+
+			// Reset operation state
 			currentOperationRef.current = null;
+		};
+
+		// Handle mouse move for drag selection
+		const handleMouseMove = (e: any) => {
+			// Check if we should start drag selection when dragging on unselected area
+			if (
+				!isSelecting &&
+				potentialDragStartRef.current &&
+				currentOperationRef.current !== 'moving' &&
+				currentOperationRef.current !== 'scaling'
+			) {
+				const pointer = canvas.getPointer(e.e);
+				const dragDistance = Math.sqrt(
+					Math.pow(pointer.x - potentialDragStartRef.current.x, 2) +
+						Math.pow(pointer.y - potentialDragStartRef.current.y, 2)
+				);
+
+				// If dragging more than 5 pixels and not on a drag-ready object, start drag selection
+				if (dragDistance > 5) {
+					const target = potentialDragStartRef.current.target;
+					const targetId = target?.id;
+
+					// Start drag selection if:
+					// 1. No target (empty space), OR
+					// 2. Target exists but is not selected and drag-ready
+					if (
+						!target ||
+						!targetId ||
+						selectedObjectIdRef.current !== targetId ||
+						!isDragReadyRef.current
+					) {
+
+						// Clear any existing selection and lock all objects
+						selectedObjectIdRef.current = null;
+						isDragReadyRef.current = false;
+						isSelectingRef.current = false;
+						selectionStartRef.current = null;
+						setIsSelecting(false);
+						setSelectionStart(null);
+						setSelectionEnd(null);
+						canvas.discardActiveObject();
+						currentOperationRef.current = null;
+
+						// Lock movement for all objects
+						canvas.getObjects().forEach((obj: any) => {
+							if (obj.id) {
+								obj.set({ lockMovementX: true, lockMovementY: true });
+							}
+						});
+
+						// Start drag selection - update refs immediately
+						isSelectingRef.current = true;
+						selectionStartRef.current = {
+							x: potentialDragStartRef.current.x,
+							y: potentialDragStartRef.current.y,
+						};
+						// Update state for UI
+						setIsSelecting(true);
+						setSelectionStart({
+							x: potentialDragStartRef.current.x,
+							y: potentialDragStartRef.current.y,
+						});
+						setSelectionEnd({ x: pointer.x, y: pointer.y });
+						currentOperationRef.current = 'selecting';
+
+						// Clear the potential drag start
+						potentialDragStartRef.current = null;
+					}
+				}
+			}
+
+			if (
+				!isSelectingRef.current ||
+				!selectionStartRef.current ||
+				currentOperationRef.current !== 'selecting'
+			) {
+				return;
+			}
+
+			const pointer = canvas.getPointer(e.e);
+			selectionEndRef.current = { x: pointer.x, y: pointer.y };
+			setSelectionEnd({ x: pointer.x, y: pointer.y });
+
+			// Visual feedback - highlight objects that would be selected
+			const selectionBounds = {
+				left: Math.min(selectionStartRef.current.x, pointer.x),
+				top: Math.min(selectionStartRef.current.y, pointer.y),
+				right: Math.max(selectionStartRef.current.x, pointer.x),
+				bottom: Math.max(selectionStartRef.current.y, pointer.y),
+			};
+
+			// Clear previous highlights
+			canvas.getObjects().forEach((obj: any) => {
+				if (obj.id) {
+					obj.set('strokeWidth', obj.id === hoveredObjectId ? 3 : 1);
+				}
+			});
+
+			// Show 3px border hover effect for objects inside selection area
+			objects.forEach((obj) => {
+				const objBounds = {
+					left: obj.left,
+					top: obj.top,
+					right: obj.left + obj.width,
+					bottom: obj.top + obj.height,
+				};
+
+				// Check if object is completely inside selection bounds
+				if (
+					objBounds.left >= selectionBounds.left &&
+					objBounds.top >= selectionBounds.top &&
+					objBounds.right <= selectionBounds.right &&
+					objBounds.bottom <= selectionBounds.bottom
+				) {
+					const fabricObj = fabricObjectsRef.current.get(obj.id);
+					if (fabricObj) {
+						// Apply 3px border hover effect
+						fabricObj.set('strokeWidth', 3);
+						fabricObj.set(
+							'stroke',
+							(fabricObj as any).originalStroke || fabricObj.stroke || '#000'
+						);
+					}
+				}
+			});
+
+			canvas.renderAll();
+		};
+
+		// Handle mouse up to finalize drag selection
+		const handleMouseUp = (e: any) => {
+			// Clear potential drag start
+			potentialDragStartRef.current = null;
+
+			// Check for deselection (click vs drag detection)
+			if (
+				clickStartRef.current &&
+				selectedObjectIdRef.current &&
+				isDragReadyRef.current
+			) {
+				const pointer = canvas.getPointer(e.e);
+				const distance = Math.sqrt(
+					Math.pow(pointer.x - clickStartRef.current.x, 2) +
+						Math.pow(pointer.y - clickStartRef.current.y, 2)
+				);
+				const timeDiff = Date.now() - clickStartRef.current.time;
+
+				// If minimal movement and quick click, deselect
+				if (
+					distance < 5 &&
+					timeDiff < 300 &&
+					clickStartRef.current.targetId === selectedObjectIdRef.current
+				) {
+
+					// Deselect the object
+					selectedObjectIdRef.current = null;
+					isDragReadyRef.current = false;
+					canvas.discardActiveObject();
+					canvas.renderAll();
+					// Clear click tracking
+					clickStartRef.current = null;
+					return;
+				}
+			}
+			// Clear click tracking after processing
+			clickStartRef.current = null;
+
+			// Handle showing resize handles for selected object after first click
+			if (selectedObjectIdRef.current && !isDragReadyRef.current && !isSelecting) {
+				const selectedObj = canvas
+					.getObjects()
+					.find((obj: any) => obj.id === selectedObjectIdRef.current);
+				if (selectedObj && !canvas.getActiveObject()) {
+
+					canvas.setActiveObject(selectedObj);
+					canvas.renderAll();
+				}
+			}
+
+			// Drag selection is now handled by the native mouseup handler
+			// This ensures object selection happens before state is cleared
+			setIsSelecting(false);
+			setSelectionStart(null);
+			setSelectionEnd(null);
+			currentOperationRef.current = null;
+			canvas.renderAll();
 		};
 
 		// Handle when scaling starts
@@ -188,60 +516,138 @@ export const CanvasEditor = () => {
 			}
 		};
 
-		// Simple scaling constraint using events
+		// Comprehensive scaling constraints using events
 		const handleObjectScaling = (e: any) => {
 			const target = e.target;
 			if (!target || !target.id) return;
 
-			const targetObj = objects.find(o => o.id === target.id);
+			const targetId = target.id;
+			const targetObj = objects.find((obj: CanvasObject) => obj.id === targetId);
 			if (!targetObj) return;
 
-			// Get the bounding rect of the scaled object
-			const boundingRect = target.getBoundingRect();
-			const constraints = getBoundaryConstraints(targetObj);
+			// Get current transform info
+			const transform = e.transform;
+			if (!transform) return;
 
-			// Check boundaries
-			if (boundingRect.left < constraints.minLeft ||
-				boundingRect.top < constraints.minTop ||
-				boundingRect.left + boundingRect.width > constraints.maxRight ||
-				boundingRect.top + boundingRect.height > constraints.maxBottom) {
-				
-				// Constrain the scale to fit within boundaries
-				const maxScaleX = (constraints.maxRight - constraints.minLeft) / target.width;
-				const maxScaleY = (constraints.maxBottom - constraints.minTop) / target.height;
-				
-				const constrainedScaleX = Math.min(target.scaleX, maxScaleX);
-				const constrainedScaleY = Math.min(target.scaleY, maxScaleY);
-				
-				target.set({
-					scaleX: Math.max(0.1, constrainedScaleX),
-					scaleY: Math.max(0.1, constrainedScaleY)
+			// Get the scaling corner/edge being used
+			const corner = transform.corner || scalingCornerRef.current;
+
+			// Calculate the object's bounding box after scaling
+			const scaledWidth = target.width * target.scaleX;
+			const scaledHeight = target.height * target.scaleY;
+
+			// Calculate the bounds of the scaled object
+			const objectBounds = {
+				left: target.left,
+				top: target.top,
+				right: target.left + scaledWidth,
+				bottom: target.top + scaledHeight,
+			};
+
+			// 1. MAX SCALING CONSTRAINT: Can't scale bigger than parent/canvas
+			const parentConstraints = getBoundaryConstraints(targetObj);
+
+			// Calculate maximum scale factors based on which corner is being dragged
+			let maxScaleX = Infinity;
+			let maxScaleY = Infinity;
+
+			// For X scaling constraints
+			if (corner && (corner.includes('l') || corner === 'ml')) {
+				// Scaling from left side - constrain by left boundary
+				const availableWidth = objectBounds.right - parentConstraints.minLeft;
+				maxScaleX = availableWidth / target.width;
+			} else if (corner && (corner.includes('r') || corner === 'mr')) {
+				// Scaling from right side - constrain by right boundary
+				const availableWidth = parentConstraints.maxRight - objectBounds.left;
+				maxScaleX = availableWidth / target.width;
+			} else {
+				// Center scaling or uniform - constrain by both sides
+				const availableWidthLeft = objectBounds.right - parentConstraints.minLeft;
+				const availableWidthRight = parentConstraints.maxRight - objectBounds.left;
+				maxScaleX = Math.min(availableWidthLeft, availableWidthRight) / target.width;
+			}
+
+			// For Y scaling constraints
+			if (corner && (corner.includes('t') || corner === 'mt')) {
+				// Scaling from top side - constrain by top boundary
+				const availableHeight = objectBounds.bottom - parentConstraints.minTop;
+				maxScaleY = availableHeight / target.height;
+			} else if (corner && (corner.includes('b') || corner === 'mb')) {
+				// Scaling from bottom side - constrain by bottom boundary
+				const availableHeight = parentConstraints.maxBottom - objectBounds.top;
+				maxScaleY = availableHeight / target.height;
+			} else {
+				// Center scaling or uniform - constrain by both sides
+				const availableHeightTop = objectBounds.bottom - parentConstraints.minTop;
+				const availableHeightBottom = parentConstraints.maxBottom - objectBounds.top;
+				maxScaleY = Math.min(availableHeightTop, availableHeightBottom) / target.height;
+			}
+
+			// 2. MIN SCALING CONSTRAINT: Can't scale smaller than largest child
+			const children = objects.filter((obj: CanvasObject) => obj.parentId === targetId);
+			let minScaleX = target.minScaleLimit || 0.1;
+			let minScaleY = target.minScaleLimit || 0.1;
+
+			if (children.length > 0) {
+				// Find the child that requires the most space relative to the parent's original size
+				let maxRequiredWidth = 0;
+				let maxRequiredHeight = 0;
+
+				children.forEach((child) => {
+					// Calculate child position relative to parent's original position
+					const relativeLeft = child.left - targetObj.left;
+					const relativeTop = child.top - targetObj.top;
+
+					// Calculate required parent dimensions to contain this child
+					const requiredWidth = relativeLeft + child.width;
+					const requiredHeight = relativeTop + child.height;
+
+					maxRequiredWidth = Math.max(maxRequiredWidth, requiredWidth);
+					maxRequiredHeight = Math.max(maxRequiredHeight, requiredHeight);
 				});
-				
-				// Ensure position stays within bounds
-				const newBoundingRect = target.getBoundingRect();
-				let adjustedLeft = target.left;
-				let adjustedTop = target.top;
-				
-				if (newBoundingRect.left < constraints.minLeft) {
-					adjustedLeft = target.left + (constraints.minLeft - newBoundingRect.left);
+
+				// Calculate minimum scale needed to contain all children
+				if (maxRequiredWidth > 0) {
+					minScaleX = Math.max(minScaleX, maxRequiredWidth / targetObj.width);
 				}
-				if (newBoundingRect.top < constraints.minTop) {
-					adjustedTop = target.top + (constraints.minTop - newBoundingRect.top);
+				if (maxRequiredHeight > 0) {
+					minScaleY = Math.max(minScaleY, maxRequiredHeight / targetObj.height);
 				}
-				if (newBoundingRect.left + newBoundingRect.width > constraints.maxRight) {
-					adjustedLeft = target.left - ((newBoundingRect.left + newBoundingRect.width) - constraints.maxRight);
-				}
-				if (newBoundingRect.top + newBoundingRect.height > constraints.maxBottom) {
-					adjustedTop = target.top - ((newBoundingRect.top + newBoundingRect.height) - constraints.maxBottom);
-				}
-				
+			}
+
+			// 3. APPLY CONSTRAINTS
+			let constrainedScaleX = target.scaleX;
+			let constrainedScaleY = target.scaleY;
+			let wasConstrained = false;
+
+			// Apply maximum constraints
+			if (target.scaleX > maxScaleX) {
+				constrainedScaleX = maxScaleX;
+				wasConstrained = true;
+			}
+			if (target.scaleY > maxScaleY) {
+				constrainedScaleY = maxScaleY;
+				wasConstrained = true;
+			}
+
+			// Apply minimum constraints
+			if (target.scaleX < minScaleX) {
+				constrainedScaleX = minScaleX;
+				wasConstrained = true;
+			}
+			if (target.scaleY < minScaleY) {
+				constrainedScaleY = minScaleY;
+				wasConstrained = true;
+			}
+
+			// Apply constraints if needed
+			if (wasConstrained) {
 				target.set({
-					left: adjustedLeft,
-					top: adjustedTop
+					scaleX: constrainedScaleX,
+					scaleY: constrainedScaleY,
 				});
-				
 				target.setCoords();
+				canvas.renderAll();
 			}
 		};
 
@@ -254,8 +660,9 @@ export const CanvasEditor = () => {
 			// Set operation state to moving
 			currentOperationRef.current = 'moving';
 
-			const targetId = (target as any).id;
-			const targetObj = objects.find((o) => o.id === targetId);
+			const movingTargetId = (target as any).id;
+
+			const targetObj = objects.find((o: CanvasObject) => o.id === movingTargetId);
 			if (!targetObj) return;
 
 			// Apply boundary constraints to the target object using common function
@@ -283,7 +690,7 @@ export const CanvasEditor = () => {
 			const finalDeltaY = constrainedTop - targetObj.top;
 
 			// Move all descendants with the parent using the same delta
-			const descendants = getAllDescendants(targetId, objects);
+			const descendants = getAllDescendants(movingTargetId, objects);
 			descendants.forEach((descendant) => {
 				const fabricObj = fabricObjectsRef.current.get(descendant.id);
 				if (fabricObj && fabricObj !== target) {
@@ -307,27 +714,13 @@ export const CanvasEditor = () => {
 			const target = e.target;
 			if (!target || !(target as any).id) return;
 
-			console.log('[DEBUG SCALING SESSION END]', {
-				objectId: target.id,
-				operation: currentOperationRef.current,
-				finalPosition: {
-					left: target.left,
-					top: target.top,
-					width: target.width,
-					height: target.height,
-					scaleX: target.scaleX,
-					scaleY: target.scaleY
-				},
-				boundingRect: target.getBoundingRect()
-			});
-
 			// Always bake in scale if not 1
 			let updatedWidth = target.width;
 			let updatedHeight = target.height;
 			if (Math.abs(target.scaleX - 1) > 0.001 || Math.abs(target.scaleY - 1) > 0.001) {
 				updatedWidth = target.width * target.scaleX;
 				updatedHeight = target.height * target.scaleY;
-				
+
 				target.set({
 					width: updatedWidth,
 					height: updatedHeight,
@@ -335,14 +728,6 @@ export const CanvasEditor = () => {
 					scaleY: 1,
 				});
 				target.setCoords();
-				
-				console.log('[DEBUG SCALE BAKED]', {
-					objectId: target.id,
-					bakedDimensions: {
-						width: updatedWidth,
-						height: updatedHeight
-					}
-				});
 			}
 
 			// Clear operation state
@@ -401,14 +786,132 @@ export const CanvasEditor = () => {
 			setHoveredObjectId(null);
 		};
 
-
 		canvas.on('mouse:down', handleMouseDown);
+		canvas.on('mouse:move', handleMouseMove);
+		canvas.on('mouse:up', handleMouseUp);
 		canvas.on('object:scaling', handleScalingStart);
 		canvas.on('object:scaling', handleObjectScaling);
 		canvas.on('object:moving', handleObjectMoving);
 		canvas.on('object:modified', handleObjectModified);
 		canvas.on('mouse:over', handleMouseOver);
 		canvas.on('mouse:out', handleMouseOut);
+
+		// Native DOM mouse move handler for reliable selection box updates
+		const handleNativeMouseMove = (e: MouseEvent) => {
+			if (
+				!isSelectingRef.current ||
+				!selectionStartRef.current ||
+				currentOperationRef.current !== 'selecting'
+			)
+				return;
+
+			// Get canvas bounds for coordinate conversion
+			const canvasRect = canvasElement.getBoundingClientRect();
+			const x = e.clientX - canvasRect.left;
+			const y = e.clientY - canvasRect.top;
+
+			selectionEndRef.current = { x, y };
+			setSelectionEnd({ x, y });
+		};
+
+		// Native DOM mouse up handler for reliable selection clearing
+		const handleNativeMouseUp = () => {
+			if (isSelectingRef.current && currentOperationRef.current === 'selecting') {
+				// Process object selection BEFORE clearing state
+				if (selectionStartRef.current && selectionEndRef.current) {
+					const selectionBounds = {
+						left: Math.min(selectionStartRef.current.x, selectionEndRef.current.x),
+						top: Math.min(selectionStartRef.current.y, selectionEndRef.current.y),
+						right: Math.max(selectionStartRef.current.x, selectionEndRef.current.x),
+						bottom: Math.max(selectionStartRef.current.y, selectionEndRef.current.y),
+					};
+
+					// Find objects completely inside selection bounds
+					const objectsInSelection: CanvasObject[] = [];
+					objects.forEach((obj) => {
+						const objBounds = {
+							left: obj.left,
+							top: obj.top,
+							right: obj.left + obj.width,
+							bottom: obj.top + obj.height,
+						};
+
+
+
+						// Check if object is completely inside selection bounds
+						if (
+							objBounds.left >= selectionBounds.left &&
+							objBounds.top >= selectionBounds.top &&
+							objBounds.right <= selectionBounds.right &&
+							objBounds.bottom <= selectionBounds.bottom
+						) {
+							objectsInSelection.push(obj);
+
+						}
+					});
+
+					// Find the most parent object (lowest depth) among selected objects
+					if (objectsInSelection.length > 0) {
+						let mostParentObject: CanvasObject | null = null;
+						let lowestDepth = Infinity;
+
+						objectsInSelection.forEach((obj: CanvasObject) => {
+							const depth = getObjectDepth(obj.id, objects);
+							if (depth < lowestDepth) {
+								lowestDepth = depth;
+								mostParentObject = obj;
+							}
+						});
+
+						if (mostParentObject) {
+							const selectedObject = mostParentObject as CanvasObject;
+							// Update selection state - drag-selected objects are immediately ready to drag
+							selectedObjectIdRef.current = selectedObject.id;
+							isDragReadyRef.current = true;
+
+							// Show resize handles immediately and unlock for dragging
+							const fabricObj = fabricObjectsRef.current.get(selectedObject.id);
+							if (fabricObj) {
+								// Unlock the object for immediate dragging
+								fabricObj.set({
+									lockMovementX: false,
+									lockMovementY: false,
+								});
+
+								// Set as active object to show resize handles
+								canvas.setActiveObject(fabricObj);
+
+							}
+						}
+					}
+				}
+
+				// Clear ALL hover effects - reset all object strokes to normal
+				canvas.getObjects().forEach((obj: any) => {
+					if (obj.id) {
+						const objData = objects.find((o) => o.id === obj.id);
+						if (objData) {
+							obj.set('stroke', objData.stroke);
+							obj.set('strokeWidth', 1); // Remove all hover effects
+						}
+					}
+				});
+
+				canvas.renderAll();
+
+
+				// Clear selection state after processing
+				isSelectingRef.current = false;
+				selectionStartRef.current = null;
+				selectionEndRef.current = null;
+				currentOperationRef.current = null;
+				// Update UI state
+				setIsSelecting(false);
+				setSelectionStart(null);
+				setSelectionEnd(null);
+				console.log('[DEBUG] Native mouse up - selection cleared');
+			}
+		};
 
 		// Mouse enter/leave tracking for canvas
 		const canvasElement = canvas.getElement ? canvas.getElement() : canvas.lowerCanvasEl;
@@ -425,16 +928,44 @@ export const CanvasEditor = () => {
 					canvas.discardActiveObject();
 				}
 				currentOperationRef.current = null;
+			} else if (currentOperationRef.current === 'selecting') {
+				// Clean up drag selection
+				// Reset all object strokes to normal
+				canvas.getObjects().forEach((obj: any) => {
+					if (obj.id) {
+						const objData = objects.find((o: CanvasObject) => o.id === obj.id);
+						if (objData) {
+							obj.set('stroke', objData.stroke);
+							obj.set('strokeWidth', obj.id === hoveredObjectId ? 3 : 1);
+						}
+					}
+				});
+
+				setIsSelecting(false);
+				setSelectionStart(null);
+				setSelectionEnd(null);
+				currentOperationRef.current = null;
+				canvas.renderAll();
 			}
 		};
+
 		const handleMouseEnter = () => {
 			mouseIsOverCanvas.current = true;
 		};
+
 		canvasElement.addEventListener('mouseleave', handleMouseLeave);
 		canvasElement.addEventListener('mouseenter', handleMouseEnter);
+		// Add native DOM mouse move listener for reliable selection updates
+		document.addEventListener('mousemove', handleNativeMouseMove);
+		// Add native DOM mouse up listener for reliable selection clearing
+		document.addEventListener('mouseup', handleNativeMouseUp);
+
+
 
 		return () => {
 			canvas.off('mouse:down', handleMouseDown);
+			canvas.off('mouse:move', handleMouseMove);
+			canvas.off('mouse:up', handleMouseUp);
 			canvas.off('object:scaling', handleScalingStart);
 			canvas.off('object:scaling', handleObjectScaling);
 			canvas.off('object:moving', handleObjectMoving);
@@ -445,6 +976,11 @@ export const CanvasEditor = () => {
 				canvas.getElement ? canvas.getElement() : canvas.lowerCanvasEl;
 			canvasElement.removeEventListener('mouseleave', handleMouseLeave);
 			canvasElement.removeEventListener('mouseenter', handleMouseEnter);
+			// Remove native DOM mouse move listener
+			document.removeEventListener('mousemove', handleNativeMouseMove);
+			// Remove native DOM mouse up listener
+			document.removeEventListener('mouseup', handleNativeMouseUp);
+
 		};
 	}, [editor, objects]);
 
@@ -456,9 +992,27 @@ export const CanvasEditor = () => {
 					display: 'inline-block',
 					border: '1px solid #ccc',
 					borderRadius: '4px',
+					position: 'relative',
 				}}
 			>
 				<FabricJSCanvas className='sample-canvas' onReady={handleReady} />
+
+				{/* Drag Selection Box Overlay */}
+				{isSelecting && selectionStart && selectionEnd && (
+					<div
+						style={{
+							position: 'absolute',
+							left: Math.min(selectionStart.x, selectionEnd.x),
+							top: Math.min(selectionStart.y, selectionEnd.y),
+							width: Math.abs(selectionEnd.x - selectionStart.x),
+							height: Math.abs(selectionEnd.y - selectionStart.y),
+							border: '2px solid rgba(0, 123, 255, 0.8)',
+							backgroundColor: 'rgba(0, 123, 255, 0.1)',
+							pointerEvents: 'none',
+							zIndex: 1000,
+						}}
+					/>
+				)}
 			</div>
 		</div>
 	);
