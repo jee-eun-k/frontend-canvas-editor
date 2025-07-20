@@ -3,7 +3,7 @@ import * as fabric from 'fabric';
 import { CanvasObject } from '../types/canvas';
 import { useCanvasSelection } from './useCanvasSelection';
 import { useCanvasObjectManipulation } from './useCanvasObjectManipulation';
-import { getObjectsInSelectionBounds, findMostParentObject } from '../utils/canvasObjectUtils';
+import { getObjectsInSelectionBounds, findMostParentObject, isPointNearObjectEdge } from '../utils/canvasObjectUtils';
 
 export const useCanvasEvents = (
   objects: CanvasObject[],
@@ -47,7 +47,28 @@ export const useCanvasEvents = (
 
     const targetId = (target as any).id;
     if (targetId) {
-      // First click: select object
+      // Check if click is within 10px of object edge
+      const targetObject = objects.find(obj => obj.id === targetId);
+      if (targetObject && !isPointNearObjectEdge(pointer.x, pointer.y, targetObject, 10)) {
+        // Click is not near edge, treat as if no target was clicked
+        // Clear selection and start drag selection
+        selection.clearSelection();
+        selection.endSelection();
+        canvas.discardActiveObject();
+
+        // Lock all objects
+        canvas.getObjects().forEach((obj: any) => {
+          if (obj.id) {
+            obj.set({ lockMovementX: true, lockMovementY: true });
+          }
+        });
+
+        selection.startSelection(pointer.x, pointer.y);
+        manipulation.currentOperationRef.current = 'selecting';
+        return;
+      }
+
+      // First click: select object (only if near edge)
       if (selection.selectedObjectIdRef.current !== targetId) {
         // Lock all objects
         canvas.getObjects().forEach((obj: any) => {
@@ -132,6 +153,45 @@ export const useCanvasEvents = (
   };
 
   const handleMouseMove = (canvas: fabric.Canvas) => (e: any) => {
+    const pointer = canvas.getPointer(e.e);
+    
+    // Check for edge proximity hover effects (only when not selecting or dragging)
+    if (
+      manipulation.currentOperationRef.current !== 'selecting' &&
+      manipulation.currentOperationRef.current !== 'moving' &&
+      manipulation.currentOperationRef.current !== 'scaling' &&
+      !selection.isSelectingRef.current
+    ) {
+      let hoveredObjectId: string | null = null;
+      
+      // Check all objects to see if mouse is near any edge (check in reverse order for proper layering)
+      const canvasObjects = canvas.getObjects().reverse();
+      for (const fabricObj of canvasObjects) {
+        const objId = (fabricObj as any).id;
+        if (objId) {
+          const canvasObject = objects.find(obj => obj.id === objId);
+          if (canvasObject && isPointNearObjectEdge(pointer.x, pointer.y, canvasObject, 10)) {
+            hoveredObjectId = objId;
+            break; // Take the topmost object that matches
+          }
+        }
+      }
+      
+      // Update hover state if it changed
+      if (selection.objectState.hoveredObjectId !== hoveredObjectId) {
+        selection.setHovered(hoveredObjectId);
+      }
+
+      // Set canvas cursor based on hover state
+      if (hoveredObjectId) {
+        const isSelectedAndReady = hoveredObjectId === selection.selectedObjectIdRef.current && selection.isDragReadyRef.current;
+        canvas.hoverCursor = isSelectedAndReady ? 'move' : 'pointer';
+      } else {
+        canvas.hoverCursor = 'default';
+      }
+
+    }
+
     // Check if we should start drag selection
     if (
       !selection.selectionState.isSelecting &&
@@ -139,7 +199,6 @@ export const useCanvasEvents = (
       manipulation.currentOperationRef.current !== 'moving' &&
       manipulation.currentOperationRef.current !== 'scaling'
     ) {
-      const pointer = canvas.getPointer(e.e);
       const dragDistance = Math.sqrt(
         Math.pow(pointer.x - potentialDragStartRef.current.x, 2) +
           Math.pow(pointer.y - potentialDragStartRef.current.y, 2)
@@ -186,8 +245,6 @@ export const useCanvasEvents = (
     ) {
       return;
     }
-
-    const pointer = canvas.getPointer(e.e);
     selection.updateSelection(pointer.x, pointer.y);
 
     // Visual feedback - highlight objects in selection
@@ -321,7 +378,21 @@ export const useCanvasEvents = (
   const handleMouseOver = () => (e: any) => {
     const target = e.target;
     if (target && (target as any).id) {
-      selection.setHovered((target as any).id);
+      const targetId = (target as any).id;
+      const targetObject = objects.find(obj => obj.id === targetId);
+      
+      if (targetObject) {
+        // Get the mouse position relative to the canvas
+        const canvas = target.canvas;
+        const pointer = canvas.getPointer(e.e);
+        
+        // Only set hover if mouse is within 10px of object edge
+        if (isPointNearObjectEdge(pointer.x, pointer.y, targetObject, 10)) {
+          selection.setHovered(targetId);
+        } else {
+          selection.setHovered(null);
+        }
+      }
     }
   };
 

@@ -1,6 +1,6 @@
 import * as fabric from 'fabric';
 import { FabricJSCanvas, useFabricJSEditor } from 'fabricjs-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { CanvasObject } from '../types/canvas';
 import { useCanvasEvents } from '../hooks/useCanvasEvents';
 
@@ -64,17 +64,17 @@ export const CanvasEditor = () => {
 			// Calculate depth for each object (how many parents it has)
 			const getDepth = (obj: any): number => {
 				if (!obj.parentId) return 0;
-				const parent = objects.find(o => o.id === obj.parentId);
+				const parent = objects.find((o) => o.id === obj.parentId);
 				return parent ? 1 + getDepth(parent) : 0;
 			};
-			
+
 			const depthA = getDepth(a);
 			const depthB = getDepth(b);
-			
+
 			// Sort by depth: parents first (depth 0), then children (depth 1), then grandchildren (depth 2), etc.
 			return depthA - depthB;
 		});
-		
+
 		sortedObjects.forEach((obj) => {
 			const rect = new fabric.Rect({
 				left: obj.left,
@@ -123,7 +123,6 @@ export const CanvasEditor = () => {
 
 		canvas.renderAll();
 	}, [editor, canvasEvents.selection.objectState.hoveredObjectId]);
-
 
 	useEffect(() => {
 		const canvas = editor?.canvas;
@@ -177,13 +176,14 @@ export const CanvasEditor = () => {
 			canvas.off('object:modified', objectModifiedHandler);
 			canvas.off('mouse:over', mouseOverHandler);
 			canvas.off('mouse:out', mouseOutHandler);
-			
+
 			canvasElement.removeEventListener('mouseleave', handleMouseLeave);
 			canvasElement.removeEventListener('mouseenter', handleMouseEnter);
 			document.removeEventListener('mousemove', handleNativeMouseMove);
 			document.removeEventListener('mouseup', handleNativeMouseUp);
 		};
 	}, [editor, canvasEvents]);
+
 
 	return (
 		<div style={{ padding: '20px', textAlign: 'center' }}>
@@ -202,36 +202,36 @@ export const CanvasEditor = () => {
 				<FabricJSCanvas className='sample-canvas' onReady={handleReady} />
 
 				{/* Drag Selection Box Overlay */}
-				{canvasEvents.selection.selectionState.isSelecting && 
-					canvasEvents.selection.selectionState.selectionStart && 
+				{canvasEvents.selection.selectionState.isSelecting &&
+					canvasEvents.selection.selectionState.selectionStart &&
 					canvasEvents.selection.selectionState.selectionEnd && (
-					<div
-						style={{
-							position: 'absolute',
-							left: Math.min(
-								canvasEvents.selection.selectionState.selectionStart.x, 
-								canvasEvents.selection.selectionState.selectionEnd.x
-							),
-							top: Math.min(
-								canvasEvents.selection.selectionState.selectionStart.y, 
-								canvasEvents.selection.selectionState.selectionEnd.y
-							),
-							width: Math.abs(
-								canvasEvents.selection.selectionState.selectionEnd.x - 
-								canvasEvents.selection.selectionState.selectionStart.x
-							),
-							height: Math.abs(
-								canvasEvents.selection.selectionState.selectionEnd.y - 
-								canvasEvents.selection.selectionState.selectionStart.y
-							),
-							border: '3px solid #007bff',
-							backgroundColor: 'rgba(0, 123, 255, 0.15)',
-							pointerEvents: 'none',
-							zIndex: 9999,
-							boxSizing: 'border-box',
-						}}
-					/>
-				)}
+						<div
+							style={{
+								position: 'absolute',
+								left: Math.min(
+									canvasEvents.selection.selectionState.selectionStart.x,
+									canvasEvents.selection.selectionState.selectionEnd.x
+								),
+								top: Math.min(
+									canvasEvents.selection.selectionState.selectionStart.y,
+									canvasEvents.selection.selectionState.selectionEnd.y
+								),
+								width: Math.abs(
+									canvasEvents.selection.selectionState.selectionEnd.x -
+										canvasEvents.selection.selectionState.selectionStart.x
+								),
+								height: Math.abs(
+									canvasEvents.selection.selectionState.selectionEnd.y -
+										canvasEvents.selection.selectionState.selectionStart.y
+								),
+								border: '3px solid #007bff',
+								backgroundColor: 'rgba(0, 123, 255, 0.15)',
+								pointerEvents: 'none',
+								zIndex: 9999,
+								boxSizing: 'border-box',
+							}}
+						/>
+					)}
 			</div>
 		</div>
 	);

@@ -1,5 +1,47 @@
 import { CanvasObject } from '../types/canvas';
 
+/**
+ * Check if a point is within the specified distance of an object's edge
+ * @param x - X coordinate of the point
+ * @param y - Y coordinate of the point
+ * @param obj - Canvas object to check against
+ * @param edgeDistance - Distance from edge in pixels (default: 10)
+ * @returns true if point is within edge distance, false otherwise
+ */
+export const isPointNearObjectEdge = (
+  x: number,
+  y: number,
+  obj: CanvasObject,
+  edgeDistance: number = 10
+): boolean => {
+  const objLeft = obj.left;
+  const objTop = obj.top;
+  const objRight = obj.left + obj.width;
+  const objBottom = obj.top + obj.height;
+
+  // Check if point is inside the object bounds
+  const isInsideObject = x >= objLeft && x <= objRight && y >= objTop && y <= objBottom;
+  
+  if (!isInsideObject) {
+    return false;
+  }
+
+  // Check if point is within edge distance of any edge
+  const distanceFromLeft = x - objLeft;
+  const distanceFromRight = objRight - x;
+  const distanceFromTop = y - objTop;
+  const distanceFromBottom = objBottom - y;
+
+  const minDistance = Math.min(
+    distanceFromLeft,
+    distanceFromRight,
+    distanceFromTop,
+    distanceFromBottom
+  );
+
+  return minDistance <= edgeDistance;
+};
+
 export const getObjectDepth = (id: string, objects: CanvasObject[]): number => {
   const obj = objects.find((o) => o.id === id);
   if (!obj || !obj.parentId) {
