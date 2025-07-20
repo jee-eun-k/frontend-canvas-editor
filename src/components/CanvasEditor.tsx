@@ -85,17 +85,16 @@ export const CanvasEditor = () => {
         stroke: obj.stroke,
         strokeWidth: 1,
         selectable: true,
-        hasControls: true,
+        hasControls: true, // Show handles for visual feedback
         hasBorders: true,
-        // Remove rotation control completely
         hasRotatingPoint: false,
         lockRotation: true,
         // Two-step selection: start with movement locked
         lockMovementX: true,
         lockMovementY: true,
-        // Basic scaling constraints
-        minScaleLimit: 0.1,
+        // Allow Fabric.js scaling UI but override with custom logic
         lockScalingFlip: true,
+        minScaleLimit: 0.1,
         id: obj.id,
       });
 
@@ -144,21 +143,21 @@ export const CanvasEditor = () => {
     const mouseMoveHandler = canvasEvents.handleMouseMove(canvas);
     const mouseUpHandler = canvasEvents.handleMouseUp(canvas);
 
-    const objectScalingHandler =
-      canvasEvents.manipulation.handleObjectScaling(canvas);
+
     const objectMovingHandler =
       canvasEvents.manipulation.handleObjectMoving(canvas);
     const objectModifiedHandler =
       canvasEvents.manipulation.handleObjectModified(canvas);
-
+    const objectScalingHandler =
+      canvasEvents.manipulation.handleScalingStart;
     // Set up event handlers
     canvas.on("mouse:down", mouseDownHandler);
     canvas.on("mouse:move", mouseMoveHandler);
     canvas.on("mouse:up", mouseUpHandler);
-    canvas.on("object:scaling", canvasEvents.manipulation.handleScalingStart);
-    canvas.on("object:scaling", objectScalingHandler);
+
     canvas.on("object:moving", objectMovingHandler);
     canvas.on("object:modified", objectModifiedHandler);
+    canvas.on("object:scaling", objectScalingHandler);
 
     // Set up DOM event listeners
     const canvasElement = canvas.getElement
@@ -176,11 +175,6 @@ export const CanvasEditor = () => {
       canvas.off("mouse:down", mouseDownHandler);
       canvas.off("mouse:move", mouseMoveHandler);
       canvas.off("mouse:up", mouseUpHandler);
-      canvas.off(
-        "object:scaling",
-        canvasEvents.manipulation.handleScalingStart,
-      );
-      canvas.off("object:scaling", objectScalingHandler);
       canvas.off("object:moving", objectMovingHandler);
       canvas.off("object:modified", objectModifiedHandler);
 

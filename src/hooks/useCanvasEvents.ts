@@ -113,6 +113,7 @@ export const useCanvasEvents = (
           hasBorders: true,
           hasRotatingPoint: false,
           lockRotation: true,
+          // Keep scaling enabled for proper cursors
         });
 
         // Ensure controls are visible (except rotation)
@@ -175,6 +176,10 @@ export const useCanvasEvents = (
 
   const handleMouseMove = (canvas: fabric.Canvas) => (e: any) => {
     const pointer = canvas.getPointer(e.e);
+    // Custom resize: call updateCustomResize if scaling
+    if (manipulation.currentOperationRef.current === "scaling") {
+      manipulation.updateCustomResize(pointer);
+    }
 
     // Check for edge proximity hover effects (only when not selecting or dragging)
     if (
@@ -327,6 +332,11 @@ export const useCanvasEvents = (
 
   const handleMouseUp = (canvas: fabric.Canvas) => (e: any) => {
     potentialDragStartRef.current = null;
+
+    // End custom resize if it was in progress
+    if (manipulation.currentOperationRef.current === "scaling") {
+      manipulation.endCustomResize();
+    }
 
     // Check for deselection
     if (clickStartRef.current) {

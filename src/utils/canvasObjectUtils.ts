@@ -91,6 +91,29 @@ export const getBoundaryConstraints = (
   }
 };
 
+export const getChildrenBoundingBox = (
+  parentId: string,
+  objects: CanvasObject[],
+) => {
+  const children = objects.filter((o) => o.parentId === parentId);
+
+  if (children.length === 0) {
+    return null;
+  }
+
+  const lefts = children.map((c) => c.left);
+  const tops = children.map((c) => c.top);
+  const rights = children.map((c) => c.left + c.width);
+  const bottoms = children.map((c) => c.top + c.height);
+
+  return {
+    minLeft: Math.min(...lefts),
+    minTop: Math.min(...tops),
+    maxRight: Math.max(...rights),
+    maxBottom: Math.max(...bottoms),
+  };
+};
+
 export const findMostParentObject = (
   objectsInSelection: CanvasObject[],
   _allObjects: CanvasObject[],
