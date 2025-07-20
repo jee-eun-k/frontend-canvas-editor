@@ -13,11 +13,11 @@
 
 ## 사용된 기술
 
-- **React 19** with TypeScript
+- **React 19.1.0** with TypeScript 5.4.5
 - **Fabric.js 6.7.0** 캔버스 조작용
-- **fabricjs-react** React 통합용
-- **Styled Components** 스타일링용
-- **Vite** 빌드 도구
+- **fabricjs-react 2.1.0** React 통합용
+- **Styled Components 6.1.19** 스타일링용
+- **Vite 7.0.5** 빌드 도구
 - **Bun** 패키지 매니저
 
 ## 빠르게 시작해볼까요?
@@ -128,6 +128,25 @@ npm run dev
 - Edge 90+
 
 ## 개발
+
+### 사용 가능한 스크립트
+
+```bash
+# 개발 서버 실행
+bun run dev / npm run dev
+
+# 프로덕션 빌드
+bun run build / npm run build
+
+# 빌드 미리보기
+bun run preview / npm run preview
+
+# 코드 린팅
+bun run lint / npm run lint
+
+# 코드 포맷팅
+bun run format / npm run format
+```
 
 ### 프로젝트 구조
 
