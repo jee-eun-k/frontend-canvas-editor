@@ -137,8 +137,7 @@ export const CanvasEditor = () => {
 		const mouseDownHandler = canvasEvents.handleMouseDown(canvas);
 		const mouseMoveHandler = canvasEvents.handleMouseMove(canvas);
 		const mouseUpHandler = canvasEvents.handleMouseUp(canvas);
-		const mouseOverHandler = canvasEvents.handleMouseOver();
-		const mouseOutHandler = canvasEvents.handleMouseOut();
+
 		const objectScalingHandler = canvasEvents.manipulation.handleObjectScaling(canvas);
 		const objectMovingHandler = canvasEvents.manipulation.handleObjectMoving(canvas);
 		const objectModifiedHandler = canvasEvents.manipulation.handleObjectModified(canvas);
@@ -151,8 +150,7 @@ export const CanvasEditor = () => {
 		canvas.on('object:scaling', objectScalingHandler);
 		canvas.on('object:moving', objectMovingHandler);
 		canvas.on('object:modified', objectModifiedHandler);
-		canvas.on('mouse:over', mouseOverHandler);
-		canvas.on('mouse:out', mouseOutHandler);
+
 
 		// Set up DOM event listeners
 		const canvasElement = canvas.getElement ? canvas.getElement() : canvas.lowerCanvasEl;
@@ -174,8 +172,7 @@ export const CanvasEditor = () => {
 			canvas.off('object:scaling', objectScalingHandler);
 			canvas.off('object:moving', objectMovingHandler);
 			canvas.off('object:modified', objectModifiedHandler);
-			canvas.off('mouse:over', mouseOverHandler);
-			canvas.off('mouse:out', mouseOutHandler);
+
 
 			canvasElement.removeEventListener('mouseleave', handleMouseLeave);
 			canvasElement.removeEventListener('mouseenter', handleMouseEnter);

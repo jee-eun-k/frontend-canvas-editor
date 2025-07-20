@@ -375,30 +375,6 @@ export const useCanvasEvents = (
     }
   };
 
-  const handleMouseOver = () => (e: any) => {
-    const target = e.target;
-    if (target && (target as any).id) {
-      const targetId = (target as any).id;
-      const targetObject = objects.find(obj => obj.id === targetId);
-      
-      if (targetObject) {
-        // Get the mouse position relative to the canvas
-        const canvas = target.canvas;
-        const pointer = canvas.getPointer(e.e);
-        
-        // Only set hover if mouse is within 10px of object edge
-        if (isPointNearObjectEdge(pointer.x, pointer.y, targetObject, 10)) {
-          selection.setHovered(targetId);
-        } else {
-          selection.setHovered(null);
-        }
-      }
-    }
-  };
-
-  const handleMouseOut = () => () => {
-    selection.setHovered(null);
-  };
 
   return {
     selection,
@@ -408,7 +384,6 @@ export const useCanvasEvents = (
     handleMouseUp,
     handleNativeMouseMove,
     handleNativeMouseUp,
-    handleMouseOver,
-    handleMouseOut,
+
   };
 };
