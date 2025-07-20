@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react';
-import { SelectionState, ObjectState } from '../types/canvas';
+import { useRef, useState } from "react";
+import { SelectionState, ObjectState } from "../types/canvas";
 
 export const useCanvasSelection = () => {
   // Selection state - using refs for immediate synchronous access
@@ -25,7 +25,7 @@ export const useCanvasSelection = () => {
     isSelectingRef.current = true;
     selectionStartRef.current = { x, y };
     selectionEndRef.current = { x, y };
-    
+
     setSelectionState({
       isSelecting: true,
       selectionStart: { x, y },
@@ -35,9 +35,9 @@ export const useCanvasSelection = () => {
 
   const updateSelection = (x: number, y: number) => {
     if (!isSelectingRef.current || !selectionStartRef.current) return;
-    
+
     selectionEndRef.current = { x, y };
-    setSelectionState(prev => ({
+    setSelectionState((prev) => ({
       ...prev,
       selectionEnd: { x, y },
     }));
@@ -47,7 +47,7 @@ export const useCanvasSelection = () => {
     isSelectingRef.current = false;
     selectionStartRef.current = null;
     selectionEndRef.current = null;
-    
+
     setSelectionState({
       isSelecting: false,
       selectionStart: null,
@@ -58,8 +58,8 @@ export const useCanvasSelection = () => {
   const selectObject = (objectId: string, dragReady = false) => {
     selectedObjectIdRef.current = objectId;
     isDragReadyRef.current = dragReady;
-    
-    setObjectState(prev => ({
+
+    setObjectState((prev) => ({
       ...prev,
       selectedObjectId: objectId,
       isDragReady: dragReady,
@@ -69,8 +69,8 @@ export const useCanvasSelection = () => {
   const clearSelection = () => {
     selectedObjectIdRef.current = null;
     isDragReadyRef.current = false;
-    
-    setObjectState(prev => ({
+
+    setObjectState((prev) => ({
       ...prev,
       selectedObjectId: null,
       isDragReady: false,
@@ -78,7 +78,7 @@ export const useCanvasSelection = () => {
   };
 
   const setHovered = (objectId: string | null) => {
-    setObjectState(prev => ({
+    setObjectState((prev) => ({
       ...prev,
       hoveredObjectId: objectId,
     }));
@@ -86,7 +86,7 @@ export const useCanvasSelection = () => {
 
   const enableDragging = () => {
     isDragReadyRef.current = true;
-    setObjectState(prev => ({
+    setObjectState((prev) => ({
       ...prev,
       isDragReady: true,
     }));
@@ -99,11 +99,11 @@ export const useCanvasSelection = () => {
     selectionEndRef,
     selectedObjectIdRef,
     isDragReadyRef,
-    
+
     // State for React rendering
     selectionState,
     objectState,
-    
+
     // Actions
     startSelection,
     updateSelection,

@@ -1,6 +1,6 @@
-import 'fabric';
+import "fabric";
 
-declare module 'fabric' {
+declare module "fabric" {
   namespace fabric {
     interface Object {
       id: string;

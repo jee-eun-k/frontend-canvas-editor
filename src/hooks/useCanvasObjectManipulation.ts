@@ -1,12 +1,15 @@
-import { useRef } from 'react';
-import * as fabric from 'fabric';
-import { CanvasObject, OperationType } from '../types/canvas';
-import { getBoundaryConstraints, getAllDescendants } from '../utils/canvasObjectUtils';
+import { useRef } from "react";
+import * as fabric from "fabric";
+import { CanvasObject, OperationType } from "../types/canvas";
+import {
+  getBoundaryConstraints,
+  getAllDescendants,
+} from "../utils/canvasObjectUtils";
 
 export const useCanvasObjectManipulation = (
   objects: CanvasObject[],
   setObjects: React.Dispatch<React.SetStateAction<CanvasObject[]>>,
-  fabricObjectsRef: React.RefObject<Map<string, fabric.Rect>>
+  fabricObjectsRef: React.RefObject<Map<string, fabric.Rect>>,
 ) => {
   const currentOperationRef = useRef<OperationType>(null);
   const mouseIsOverCanvas = useRef(true);
@@ -17,20 +20,22 @@ export const useCanvasObjectManipulation = (
     const target = e.target;
     if (!target || !(target as any).id) return;
 
-    currentOperationRef.current = 'moving';
+    currentOperationRef.current = "moving";
     const movingTargetId = (target as any).id;
-    const targetObj = objects.find((o: CanvasObject) => o.id === movingTargetId);
+    const targetObj = objects.find(
+      (o: CanvasObject) => o.id === movingTargetId,
+    );
     if (!targetObj) return;
 
     // Apply boundary constraints
     const constraints = getBoundaryConstraints(targetObj, objects);
     const constrainedLeft = Math.max(
       constraints.minLeft,
-      Math.min(target.left, constraints.maxRight - targetObj.width)
+      Math.min(target.left, constraints.maxRight - targetObj.width),
     );
     const constrainedTop = Math.max(
       constraints.minTop,
-      Math.min(target.top, constraints.maxBottom - targetObj.height)
+      Math.min(target.top, constraints.maxBottom - targetObj.height),
     );
 
     // Update target position if constrained
@@ -46,7 +51,7 @@ export const useCanvasObjectManipulation = (
     const finalDeltaX = constrainedLeft - targetObj.left;
     const finalDeltaY = constrainedTop - targetObj.top;
     const descendants = getAllDescendants(movingTargetId, objects);
-    
+
     descendants.forEach((descendant) => {
       const fabricObj = fabricObjectsRef.current?.get(descendant.id);
       if (fabricObj && fabricObj !== target) {
@@ -88,33 +93,39 @@ export const useCanvasObjectManipulation = (
     let maxScaleY = Infinity;
 
     // X scaling constraints based on corner
-    if (corner && (corner.includes('l') || corner === 'ml')) {
+    if (corner && (corner.includes("l") || corner === "ml")) {
       const availableWidth = objectBounds.right - parentConstraints.minLeft;
       maxScaleX = availableWidth / target.width;
-    } else if (corner && (corner.includes('r') || corner === 'mr')) {
+    } else if (corner && (corner.includes("r") || corner === "mr")) {
       const availableWidth = parentConstraints.maxRight - objectBounds.left;
       maxScaleX = availableWidth / target.width;
     } else {
       const availableWidthLeft = objectBounds.right - parentConstraints.minLeft;
-      const availableWidthRight = parentConstraints.maxRight - objectBounds.left;
-      maxScaleX = Math.min(availableWidthLeft, availableWidthRight) / target.width;
+      const availableWidthRight =
+        parentConstraints.maxRight - objectBounds.left;
+      maxScaleX =
+        Math.min(availableWidthLeft, availableWidthRight) / target.width;
     }
 
     // Y scaling constraints based on corner
-    if (corner && (corner.includes('t') || corner === 'mt')) {
+    if (corner && (corner.includes("t") || corner === "mt")) {
       const availableHeight = objectBounds.bottom - parentConstraints.minTop;
       maxScaleY = availableHeight / target.height;
-    } else if (corner && (corner.includes('b') || corner === 'mb')) {
+    } else if (corner && (corner.includes("b") || corner === "mb")) {
       const availableHeight = parentConstraints.maxBottom - objectBounds.top;
       maxScaleY = availableHeight / target.height;
     } else {
       const availableHeightTop = objectBounds.bottom - parentConstraints.minTop;
-      const availableHeightBottom = parentConstraints.maxBottom - objectBounds.top;
-      maxScaleY = Math.min(availableHeightTop, availableHeightBottom) / target.height;
+      const availableHeightBottom =
+        parentConstraints.maxBottom - objectBounds.top;
+      maxScaleY =
+        Math.min(availableHeightTop, availableHeightBottom) / target.height;
     }
 
     // Min scale constraints based on children
-    const children = objects.filter((obj: CanvasObject) => obj.parentId === targetId);
+    const children = objects.filter(
+      (obj: CanvasObject) => obj.parentId === targetId,
+    );
     let minScaleX = target.minScaleLimit || 0.1;
     let minScaleY = target.minScaleLimit || 0.1;
 
@@ -127,7 +138,7 @@ export const useCanvasObjectManipulation = (
         const relativeTop = child.top - targetObj.top;
         const requiredWidth = relativeLeft + child.width;
         const requiredHeight = relativeTop + child.height;
-        
+
         maxRequiredWidth = Math.max(maxRequiredWidth, requiredWidth);
         maxRequiredHeight = Math.max(maxRequiredHeight, requiredHeight);
       });
@@ -180,7 +191,10 @@ export const useCanvasObjectManipulation = (
     // Bake in scale if not 1
     let updatedWidth = target.width;
     let updatedHeight = target.height;
-    if (Math.abs(target.scaleX - 1) > 0.001 || Math.abs(target.scaleY - 1) > 0.001) {
+    if (
+      Math.abs(target.scaleX - 1) > 0.001 ||
+      Math.abs(target.scaleY - 1) > 0.001
+    ) {
       updatedWidth = target.width * target.scaleX;
       updatedHeight = target.height * target.scaleY;
 
@@ -232,12 +246,12 @@ export const useCanvasObjectManipulation = (
           width: update.width !== undefined ? update.width : obj.width,
           height: update.height !== undefined ? update.height : obj.height,
         };
-      })
+      }),
     );
   };
 
   const handleScalingStart = (e: any) => {
-    currentOperationRef.current = 'scaling';
+    currentOperationRef.current = "scaling";
     if (e.transform && e.transform.corner) {
       scalingCornerRef.current = e.transform.corner;
     }
@@ -246,12 +260,12 @@ export const useCanvasObjectManipulation = (
   const handleMouseLeave = (canvas: fabric.Canvas) => () => {
     mouseIsOverCanvas.current = false;
     if (
-      currentOperationRef.current === 'scaling' ||
-      currentOperationRef.current === 'moving'
+      currentOperationRef.current === "scaling" ||
+      currentOperationRef.current === "moving"
     ) {
       const activeObj = canvas.getActiveObject();
       if (activeObj) {
-        canvas.fire('object:modified', { target: activeObj });
+        canvas.fire("object:modified", { target: activeObj });
         canvas.discardActiveObject();
       }
       currentOperationRef.current = null;

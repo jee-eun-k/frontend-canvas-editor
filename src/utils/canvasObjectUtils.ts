@@ -1,4 +1,4 @@
-import { CanvasObject } from '../types/canvas';
+import { CanvasObject } from "../types/canvas";
 
 /**
  * Check if a point is within the specified distance of an object's edge
@@ -12,7 +12,7 @@ export const isPointNearObjectEdge = (
   x: number,
   y: number,
   obj: CanvasObject,
-  edgeDistance: number = 10
+  edgeDistance: number = 10,
 ): boolean => {
   const objLeft = obj.left;
   const objTop = obj.top;
@@ -20,8 +20,9 @@ export const isPointNearObjectEdge = (
   const objBottom = obj.top + obj.height;
 
   // Check if point is inside the object bounds
-  const isInsideObject = x >= objLeft && x <= objRight && y >= objTop && y <= objBottom;
-  
+  const isInsideObject =
+    x >= objLeft && x <= objRight && y >= objTop && y <= objBottom;
+
   if (!isInsideObject) {
     return false;
   }
@@ -36,7 +37,7 @@ export const isPointNearObjectEdge = (
     distanceFromLeft,
     distanceFromRight,
     distanceFromTop,
-    distanceFromBottom
+    distanceFromBottom,
   );
 
   return minDistance <= edgeDistance;
@@ -52,7 +53,7 @@ export const getObjectDepth = (id: string, objects: CanvasObject[]): number => {
 
 export const getAllDescendants = (
   parentId: string,
-  objects: CanvasObject[]
+  objects: CanvasObject[],
 ): CanvasObject[] => {
   const descendants: CanvasObject[] = [];
   const children = objects.filter((obj) => obj.parentId === parentId);
@@ -65,9 +66,12 @@ export const getAllDescendants = (
   return descendants;
 };
 
-export const getBoundaryConstraints = (targetObj: CanvasObject, objects: CanvasObject[]) => {
-  const parentObj = targetObj.parentId 
-    ? objects.find((o) => o.id === targetObj.parentId) 
+export const getBoundaryConstraints = (
+  targetObj: CanvasObject,
+  objects: CanvasObject[],
+) => {
+  const parentObj = targetObj.parentId
+    ? objects.find((o) => o.id === targetObj.parentId)
     : null;
 
   if (parentObj) {
@@ -89,47 +93,33 @@ export const getBoundaryConstraints = (targetObj: CanvasObject, objects: CanvasO
 
 export const findMostParentObject = (
   objectsInSelection: CanvasObject[],
-  objects: CanvasObject[]
+  _allObjects: CanvasObject[],
 ): CanvasObject | null => {
-  if (objectsInSelection.length === 0) return null;
+  if (objectsInSelection.length === 0) {
+    return null;
+  }
 
-  let mostParentObject: CanvasObject | null = null;
-  let lowestDepth = Infinity;
+  const selectionIds = new Set(objectsInSelection.map((o) => o.id));
 
-  objectsInSelection.forEach((obj: CanvasObject) => {
-    const depth = getObjectDepth(obj.id, objects);
-    if (depth < lowestDepth) {
-      lowestDepth = depth;
-      mostParentObject = obj;
-    }
-  });
+  // Find all objects in the selection whose parent is NOT also in the selection.
+  // These are the highest-level objects within the selection group.
+  const topLevelObjects = objectsInSelection.filter(
+    (obj) => !obj.parentId || !selectionIds.has(obj.parentId),
+  );
 
-  return mostParentObject;
-};
+  // If there's only one such object, that's our target.
+  if (topLevelObjects.length === 1) {
+    return topLevelObjects[0];
+  }
 
-export const getObjectsInSelectionBounds = (
-  selectionBounds: { left: number; top: number; right: number; bottom: number },
-  objects: CanvasObject[]
-): CanvasObject[] => {
-  const objectsInSelection: CanvasObject[] = [];
-  
-  objects.forEach((obj) => {
-    const objBounds = {
-      left: obj.left,
-      top: obj.top,
-      right: obj.left + obj.width,
-      bottom: obj.top + obj.height,
-    };
+  // If there are multiple top-level objects (i.e., separate hierarchies were selected),
+  // we can decide on a rule. For now, let's return the first one.
+  // A more sophisticated rule could be to select the largest one or not select any.
+  if (topLevelObjects.length > 1) {
+    return topLevelObjects[0];
+  }
 
-    if (
-      objBounds.left >= selectionBounds.left &&
-      objBounds.top >= selectionBounds.top &&
-      objBounds.right <= selectionBounds.right &&
-      objBounds.bottom <= selectionBounds.bottom
-    ) {
-      objectsInSelection.push(obj);
-    }
-  });
-
-  return objectsInSelection;
+  // If there are no top-level objects (e.g., a child was selected but its parent was not),
+  // which shouldn't happen if the logic is sound, return the first object in the original selection.
+  return objectsInSelection[0];
 };

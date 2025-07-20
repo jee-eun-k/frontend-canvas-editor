@@ -1,19 +1,30 @@
-import { useRef, useCallback } from 'react';
-import * as fabric from 'fabric';
-import { CanvasObject } from '../types/canvas';
-import { useCanvasSelection } from './useCanvasSelection';
-import { useCanvasObjectManipulation } from './useCanvasObjectManipulation';
-import { getObjectsInSelectionBounds, findMostParentObject, isPointNearObjectEdge } from '../utils/canvasObjectUtils';
+import { useRef, useCallback } from "react";
+import * as fabric from "fabric";
+import { CanvasObject } from "../types/canvas";
+import { useCanvasSelection } from "./useCanvasSelection";
+import { useCanvasObjectManipulation } from "./useCanvasObjectManipulation";
+import {
+  findMostParentObject,
+  isPointNearObjectEdge,
+} from "../utils/canvasObjectUtils";
 
 export const useCanvasEvents = (
   objects: CanvasObject[],
   setObjects: React.Dispatch<React.SetStateAction<CanvasObject[]>>,
-  fabricObjectsRef: React.RefObject<Map<string, fabric.Rect>>
+  fabricObjectsRef: React.RefObject<Map<string, fabric.Rect>>,
 ) => {
   const selection = useCanvasSelection();
-  const manipulation = useCanvasObjectManipulation(objects, setObjects, fabricObjectsRef);
-  
-  const potentialDragStartRef = useRef<{ x: number; y: number; target: any } | null>(null);
+  const manipulation = useCanvasObjectManipulation(
+    objects,
+    setObjects,
+    fabricObjectsRef,
+  );
+
+  const potentialDragStartRef = useRef<{
+    x: number;
+    y: number;
+    target: any;
+  } | null>(null);
   const clickStartRef = useRef<{
     x: number;
     y: number;
@@ -41,15 +52,18 @@ export const useCanvasEvents = (
       });
 
       selection.startSelection(pointer.x, pointer.y);
-      manipulation.currentOperationRef.current = 'selecting';
+      manipulation.currentOperationRef.current = "selecting";
       return;
     }
 
     const targetId = (target as any).id;
     if (targetId) {
       // Check if click is within 10px of object edge
-      const targetObject = objects.find(obj => obj.id === targetId);
-      if (targetObject && !isPointNearObjectEdge(pointer.x, pointer.y, targetObject, 10)) {
+      const targetObject = objects.find((obj) => obj.id === targetId);
+      if (
+        targetObject &&
+        !isPointNearObjectEdge(pointer.x, pointer.y, targetObject, 10)
+      ) {
         // Click is not near edge, treat as if no target was clicked
         // Clear selection and start drag selection
         selection.clearSelection();
@@ -64,7 +78,7 @@ export const useCanvasEvents = (
         });
 
         selection.startSelection(pointer.x, pointer.y);
-        manipulation.currentOperationRef.current = 'selecting';
+        manipulation.currentOperationRef.current = "selecting";
         return;
       }
 
@@ -85,8 +99,10 @@ export const useCanvasEvents = (
       }
 
       // Second click: enable dragging and show resize handles
-      if (selection.selectedObjectIdRef.current === targetId && !selection.isDragReadyRef.current) {
-        
+      if (
+        selection.selectedObjectIdRef.current === targetId &&
+        !selection.isDragReadyRef.current
+      ) {
         selection.enableDragging();
         target.set({
           lockMovementX: false,
@@ -95,27 +111,29 @@ export const useCanvasEvents = (
           evented: true,
           hasControls: true,
           hasBorders: true,
+          hasRotatingPoint: false,
+          lockRotation: true,
         });
-        
+
         // Ensure controls are visible (except rotation)
         target.setControlsVisibility({
           mtr: false, // no rotation handle
-          mt: true,   // middle top
-          mb: true,   // middle bottom
-          ml: true,   // middle left
-          mr: true,   // middle right
-          tl: true,   // top left
-          tr: true,   // top right
-          bl: true,   // bottom left
-          br: true,   // bottom right
+          mt: true, // middle top
+          mb: true, // middle bottom
+          ml: true, // middle left
+          mr: true, // middle right
+          tl: true, // top left
+          tr: true, // top right
+          bl: true, // bottom left
+          br: true, // bottom right
         });
         // Also ensure rotation is locked at the object level
         target.set({
           hasRotatingPoint: false,
-          lockRotation: true
+          lockRotation: true,
         });
         target.setCoords();
-        
+
         // Set as active object to show resize handles
         canvas.discardActiveObject();
         canvas.setActiveObject(target);
@@ -139,7 +157,10 @@ export const useCanvasEvents = (
       }
 
       // Track click for deselection
-      if (selection.selectedObjectIdRef.current === targetId && selection.isDragReadyRef.current) {
+      if (
+        selection.selectedObjectIdRef.current === targetId &&
+        selection.isDragReadyRef.current
+      ) {
         clickStartRef.current = {
           x: pointer.x,
           y: pointer.y,
@@ -154,29 +175,32 @@ export const useCanvasEvents = (
 
   const handleMouseMove = (canvas: fabric.Canvas) => (e: any) => {
     const pointer = canvas.getPointer(e.e);
-    
+
     // Check for edge proximity hover effects (only when not selecting or dragging)
     if (
-      manipulation.currentOperationRef.current !== 'selecting' &&
-      manipulation.currentOperationRef.current !== 'moving' &&
-      manipulation.currentOperationRef.current !== 'scaling' &&
+      manipulation.currentOperationRef.current !== "selecting" &&
+      manipulation.currentOperationRef.current !== "moving" &&
+      manipulation.currentOperationRef.current !== "scaling" &&
       !selection.isSelectingRef.current
     ) {
       let hoveredObjectId: string | null = null;
-      
+
       // Check all objects to see if mouse is near any edge (check in reverse order for proper layering)
       const canvasObjects = canvas.getObjects().reverse();
       for (const fabricObj of canvasObjects) {
         const objId = (fabricObj as any).id;
         if (objId) {
-          const canvasObject = objects.find(obj => obj.id === objId);
-          if (canvasObject && isPointNearObjectEdge(pointer.x, pointer.y, canvasObject, 10)) {
+          const canvasObject = objects.find((obj) => obj.id === objId);
+          if (
+            canvasObject &&
+            isPointNearObjectEdge(pointer.x, pointer.y, canvasObject, 10)
+          ) {
             hoveredObjectId = objId;
             break; // Take the topmost object that matches
           }
         }
       }
-      
+
       // Update hover state if it changed
       if (selection.objectState.hoveredObjectId !== hoveredObjectId) {
         selection.setHovered(hoveredObjectId);
@@ -184,24 +208,25 @@ export const useCanvasEvents = (
 
       // Set canvas cursor based on hover state
       if (hoveredObjectId) {
-        const isSelectedAndReady = hoveredObjectId === selection.selectedObjectIdRef.current && selection.isDragReadyRef.current;
-        canvas.hoverCursor = isSelectedAndReady ? 'move' : 'pointer';
+        const isSelectedAndReady =
+          hoveredObjectId === selection.selectedObjectIdRef.current &&
+          selection.isDragReadyRef.current;
+        canvas.hoverCursor = isSelectedAndReady ? "move" : "pointer";
       } else {
-        canvas.hoverCursor = 'default';
+        canvas.hoverCursor = "default";
       }
-
     }
 
     // Check if we should start drag selection
     if (
       !selection.selectionState.isSelecting &&
       potentialDragStartRef.current &&
-      manipulation.currentOperationRef.current !== 'moving' &&
-      manipulation.currentOperationRef.current !== 'scaling'
+      manipulation.currentOperationRef.current !== "moving" &&
+      manipulation.currentOperationRef.current !== "scaling"
     ) {
       const dragDistance = Math.sqrt(
         Math.pow(pointer.x - potentialDragStartRef.current.x, 2) +
-          Math.pow(pointer.y - potentialDragStartRef.current.y, 2)
+          Math.pow(pointer.y - potentialDragStartRef.current.y, 2),
       );
 
       if (dragDistance > 5) {
@@ -229,10 +254,10 @@ export const useCanvasEvents = (
 
           selection.startSelection(
             potentialDragStartRef.current.x,
-            potentialDragStartRef.current.y
+            potentialDragStartRef.current.y,
           );
           selection.updateSelection(pointer.x, pointer.y);
-          manipulation.currentOperationRef.current = 'selecting';
+          manipulation.currentOperationRef.current = "selecting";
           potentialDragStartRef.current = null;
         }
       }
@@ -241,7 +266,7 @@ export const useCanvasEvents = (
     if (
       !selection.isSelectingRef.current ||
       !selection.selectionStartRef.current ||
-      manipulation.currentOperationRef.current !== 'selecting'
+      manipulation.currentOperationRef.current !== "selecting"
     ) {
       return;
     }
@@ -258,20 +283,44 @@ export const useCanvasEvents = (
     // Clear previous highlights
     canvas.getObjects().forEach((obj: any) => {
       if (obj.id) {
-        obj.set('strokeWidth', obj.id === selection.objectState.hoveredObjectId ? 3 : 1);
+        obj.set(
+          "strokeWidth",
+          obj.id === selection.objectState.hoveredObjectId ? 3 : 1,
+        );
       }
     });
 
     // Highlight objects in selection
-    const objectsInSelection = getObjectsInSelectionBounds(selectionBounds, objects);
-    
-    objectsInSelection.forEach((obj) => {
-      const fabricObj = fabricObjectsRef.current?.get(obj.id);
+    const fabricObjects = canvas.getObjects();
+    const objectsInSelection = fabricObjects
+      .filter((fabricObj) => {
+        if (!(fabricObj as any).id) return false;
+        const objBounds = fabricObj.getBoundingRect();
+        // Check for complete containment within selection bounds
+        return (
+          objBounds.left >= selectionBounds.left &&
+          objBounds.top >= selectionBounds.top &&
+          objBounds.left + objBounds.width <= selectionBounds.right &&
+          objBounds.top + objBounds.height <= selectionBounds.bottom
+        );
+      })
+      .map((fabricObj) =>
+        objects.find((o: CanvasObject) => o.id === (fabricObj as any).id),
+      )
+      .filter(Boolean) as CanvasObject[];
+
+    // Only highlight the object that will actually be selected
+    const mostParentObject = findMostParentObject(objectsInSelection, objects);
+    if (mostParentObject) {
+      const fabricObj = fabricObjectsRef.current?.get(mostParentObject.id);
       if (fabricObj) {
-        fabricObj.set('strokeWidth', 3);
-        fabricObj.set('stroke', (fabricObj as any).originalStroke || fabricObj.stroke || '#000');
+        fabricObj.set("strokeWidth", 3);
+        fabricObj.set(
+          "stroke",
+          (fabricObj as any).originalStroke || fabricObj.stroke || "#000",
+        );
       }
-    });
+    }
 
     canvas.renderAll();
   };
@@ -280,34 +329,102 @@ export const useCanvasEvents = (
     potentialDragStartRef.current = null;
 
     // Check for deselection
-    if (
-      clickStartRef.current &&
-      selection.selectedObjectIdRef.current &&
-      selection.isDragReadyRef.current
-    ) {
+    if (clickStartRef.current) {
       const pointer = canvas.getPointer(e.e);
-      const distance = Math.sqrt(
-        Math.pow(pointer.x - clickStartRef.current.x, 2) +
-          Math.pow(pointer.y - clickStartRef.current.y, 2)
-      );
-      const timeDiff = Date.now() - clickStartRef.current.time;
 
       if (
-        distance < 5 &&
-        timeDiff < 300 &&
-        clickStartRef.current.targetId === selection.selectedObjectIdRef.current
+        selection.selectedObjectIdRef.current &&
+        selection.isDragReadyRef.current
       ) {
-        selection.clearSelection();
-        canvas.discardActiveObject();
-        canvas.renderAll();
-        clickStartRef.current = null;
-        return;
+        const distance = Math.sqrt(
+          Math.pow(pointer.x - clickStartRef.current.x, 2) +
+            Math.pow(pointer.y - clickStartRef.current.y, 2),
+        );
+        const timeDiff = Date.now() - clickStartRef.current.time;
+
+        if (
+          distance < 5 &&
+          timeDiff < 300 &&
+          clickStartRef.current.targetId ===
+            selection.selectedObjectIdRef.current
+        ) {
+          selection.clearSelection();
+          canvas.discardActiveObject();
+          canvas.renderAll();
+          clickStartRef.current = null;
+          return;
+        }
       }
     }
+
+    // Handle drag selection completion
+    if (
+      selection.selectionStartRef.current &&
+      selection.selectionEndRef.current
+    ) {
+      const pointer = canvas.getPointer(e.e);
+      const selectionBounds = {
+        left: Math.min(selection.selectionStartRef.current.x, pointer.x),
+        top: Math.min(selection.selectionStartRef.current.y, pointer.y),
+        right: Math.max(selection.selectionStartRef.current.x, pointer.x),
+        bottom: Math.max(selection.selectionStartRef.current.y, pointer.y),
+      };
+
+      const fabricObjects = canvas.getObjects();
+      const objectsInSelection = fabricObjects
+        .filter((fabricObj) => {
+          if (!(fabricObj as any).id) return false;
+          const objBounds = fabricObj.getBoundingRect();
+          return (
+            objBounds.left >= selectionBounds.left &&
+            objBounds.top >= selectionBounds.top &&
+            objBounds.left + objBounds.width <= selectionBounds.right &&
+            objBounds.top + objBounds.height <= selectionBounds.bottom
+          );
+        })
+        .map((fabricObj) =>
+          objects.find((o: CanvasObject) => o.id === (fabricObj as any).id),
+        )
+        .filter(Boolean) as CanvasObject[];
+
+      const mostParentObject = findMostParentObject(
+        objectsInSelection,
+        objects,
+      );
+
+      if (mostParentObject) {
+        // Select object and immediately enable dragging (skip two-step process for drag selection)
+        selection.selectObject(mostParentObject.id, true);
+
+        const fabricObj = fabricObjectsRef.current?.get(mostParentObject.id);
+        if (fabricObj) {
+          fabricObj.set({
+            lockMovementX: false,
+            lockMovementY: false,
+            hasRotatingPoint: false,
+            lockRotation: true,
+          });
+          fabricObj.setControlsVisibility({ mtr: false });
+          canvas.setActiveObject(fabricObj);
+        }
+      }
+    }
+
     clickStartRef.current = null;
 
-    // Note: Resize handles are now shown immediately in handleMouseDown after second click
-    // This ensures immediate visual feedback without waiting for mouseUp
+    // Clear any remaining virtual highlights after drag selection
+    if (manipulation.currentOperationRef.current === "selecting") {
+      selection.setHovered(null);
+      canvas.getObjects().forEach((obj: any) => {
+        if ((obj as any).id) {
+          const objData = objects.find((o) => o.id === (obj as any).id);
+          if (objData) {
+            obj.set("stroke", objData.stroke);
+            obj.set("strokeWidth", 1);
+          }
+        }
+      });
+    }
 
     selection.endSelection();
     manipulation.currentOperationRef.current = null;
@@ -318,63 +435,14 @@ export const useCanvasEvents = (
     if (
       !selection.isSelectingRef.current ||
       !selection.selectionStartRef.current ||
-      manipulation.currentOperationRef.current !== 'selecting'
+      manipulation.currentOperationRef.current !== "selecting"
     )
       return;
 
-    // Get canvas bounds for coordinate conversion
-    const canvasElement = canvas.getElement ? canvas.getElement() : canvas.lowerCanvasEl;
-    const canvasRect = canvasElement.getBoundingClientRect();
-    const x = e.clientX - canvasRect.left;
-    const y = e.clientY - canvasRect.top;
-
-    selection.updateSelection(x, y);
+    // Use canvas.getPointer to get coordinates relative to the canvas, accounting for zoom/pan
+    const pointer = canvas.getPointer(e);
+    selection.updateSelection(pointer.x, pointer.y);
   };
-
-  const handleNativeMouseUp = (canvas: fabric.Canvas) => () => {
-    if (selection.isSelectingRef.current && manipulation.currentOperationRef.current === 'selecting') {
-      if (selection.selectionStartRef.current && selection.selectionEndRef.current) {
-        const selectionBounds = {
-          left: Math.min(selection.selectionStartRef.current.x, selection.selectionEndRef.current.x),
-          top: Math.min(selection.selectionStartRef.current.y, selection.selectionEndRef.current.y),
-          right: Math.max(selection.selectionStartRef.current.x, selection.selectionEndRef.current.x),
-          bottom: Math.max(selection.selectionStartRef.current.y, selection.selectionEndRef.current.y),
-        };
-
-        const objectsInSelection = getObjectsInSelectionBounds(selectionBounds, objects);
-        const mostParentObject = findMostParentObject(objectsInSelection, objects);
-
-        if (mostParentObject) {
-          selection.selectObject(mostParentObject.id, true);
-
-          const fabricObj = fabricObjectsRef.current?.get(mostParentObject.id);
-          if (fabricObj) {
-            fabricObj.set({
-              lockMovementX: false,
-              lockMovementY: false,
-            });
-            canvas.setActiveObject(fabricObj);
-          }
-        }
-      }
-
-      // Clear hover effects
-      canvas.getObjects().forEach((obj: any) => {
-        if (obj.id) {
-          const objData = objects.find((o) => o.id === obj.id);
-          if (objData) {
-            obj.set('stroke', objData.stroke);
-            obj.set('strokeWidth', 1);
-          }
-        }
-      });
-
-      canvas.renderAll();
-      selection.endSelection();
-      manipulation.currentOperationRef.current = null;
-    }
-  };
-
 
   return {
     selection,
@@ -383,7 +451,5 @@ export const useCanvasEvents = (
     handleMouseMove,
     handleMouseUp,
     handleNativeMouseMove,
-    handleNativeMouseUp,
-
   };
 };

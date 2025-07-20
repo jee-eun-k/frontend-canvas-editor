@@ -21,4 +21,4 @@ export interface ObjectState {
   hoveredObjectId: string | null;
 }
 
-export type OperationType = 'moving' | 'scaling' | 'selecting' | null;
+export type OperationType = "moving" | "scaling" | "selecting" | null;
