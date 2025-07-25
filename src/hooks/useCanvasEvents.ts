@@ -1,19 +1,21 @@
-import { useRef, useCallback } from "react";
 import * as fabric from "fabric";
+import { useRef } from "react";
 import { CanvasObject } from "../types/canvas";
-import { useCanvasSelection } from "./useCanvasSelection";
-import { useCanvasObjectManipulation } from "./useCanvasObjectManipulation";
 import {
   findMostParentObject,
   isPointNearObjectEdge,
 } from "../utils/canvasObjectUtils";
+import { useCanvasObjectManipulation } from "./useCanvasObjectManipulation";
+import { useCanvasSelection } from "./useCanvasSelection";
 
 export const useCanvasEvents = (
   objects: CanvasObject[],
   setObjects: React.Dispatch<React.SetStateAction<CanvasObject[]>>,
   fabricObjectsRef: React.RefObject<Map<string, fabric.Rect>>,
 ) => {
+  
   const selection = useCanvasSelection();
+  
   const manipulation = useCanvasObjectManipulation(
     objects,
     setObjects,
@@ -25,6 +27,7 @@ export const useCanvasEvents = (
     y: number;
     target: any;
   } | null>(null);
+
   const clickStartRef = useRef<{
     x: number;
     y: number;

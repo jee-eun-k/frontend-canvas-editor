@@ -1,8 +1,8 @@
 import * as fabric from "fabric";
 import { FabricJSCanvas, useFabricJSEditor } from "fabricjs-react";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { CanvasObject } from "../types/canvas";
+import { useEffect, useRef, useState } from 'react';
 import { useCanvasEvents } from "../hooks/useCanvasEvents";
+import { CanvasObject } from '../types/canvas';
 
 // 2. 초기 데이터 생성
 const initialObjects: CanvasObject[] = [
